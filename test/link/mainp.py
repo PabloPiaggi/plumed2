@@ -23,7 +23,7 @@ virial=np.zeros((3,3),dtype=float)
 # Repeat the call multiple times to see if 
 # there are problems with multiple start/stop of the environment, and
 # for more accurate timing. Remember to delete the bck* files before running!
-num_loops = 50
+num_loops = 1#50
 
 # Create the class only once
 plumed = Plumed()
@@ -64,10 +64,11 @@ for idx in range(num_loops):
     # New command by Pablo Piaggi to send direclty commands that would be written
     # in the input file.
     # Check if atoms were correctly received by Plumed.
-    plumed.cmd("action", "DUMPATOMS ATOMS=1-64 FILE=testout.xyz")
+    plumed.cmd("action","DUMPATOMS ATOMS=1-64 FILE=testout.xyz")
     # Calculate Q6
-    plumed.cmd("action","Q6 SPECIES=1-32 D_0=3.0 R_0=1.5 MEAN LABEL=q6")
+    plumed.cmd("action","Q6 SPECIES=1-32 D_0=3.0 R_0=1.5 MEAN MIN={BETA=0.1} LABEL=q6") 
     plumed.cmd("action","PRINT ARG=q6.* FILE=colv")
+    plumed.cmd("action","DUMPMULTICOLVAR DATA=q6 FILE=MULTICOLVAR.xyz")
     # Post-init settings
     plumed.cmd("setStep",step)
     plumed.cmd("setBox",box)
@@ -79,11 +80,21 @@ for idx in range(num_loops):
     # Calculate
     plumed.cmd("calc")
 
-    # TODO: here get values instead of reading files
-    positions = plumed.grab("positions")
-    print 'outshape:', positions.shape
-    print 'outval:', positions
-    
+    # Get values instead of reading files
+
+    # Test with positions 
+    #positions = plumed.grab("positions")
+    #print 'outshape:', positions.shape
+    #print 'outval:', positions
+   
+    # Grab single-valued actions and actions with components 
+    outGrab = plumed.grab("q6.mean,q6.min,q6.*")
+    print 'outGrab:', outGrab
+
+    # Grab actions with vessels
+    outVessels = plumed.grab("vessels q6")
+    print 'outVessels:', outVessels
+
     # Stop the environment, delete 
     plumed.stop_plumed()
 
@@ -96,6 +107,4 @@ print >>sys.stderr, "Num loops:  {:4d}".format(num_loops)
 print >>sys.stderr, "Time/loop:  {:4.1f} ms".format(dt/float(num_loops))
 
 # TO DO: Write wrapper for actions. For instance "DISTANCE LABEL=l6 ATOMS=3,4" = Distance(label="l6",atoms)
-# TO DO: Wrappers to get values back from actions. Very important!
 # TO DO: Perhaps have two options. plumed.setMasses(masses) = plumed.cmd("setMasses",masses) . The first would be more pythonic...
-# IDEAS AND TO DO: Retrieve results of calculation directly in plumed. Check how forces, etc. are passed back to the md code (I think that they are pointers). Remember that the bias is passed back to gromacs for replica exchange so we can also passed it to python (perhaps do the same for CVs?). Pass things back according to a label. Check how to delete actions.

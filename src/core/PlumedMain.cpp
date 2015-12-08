@@ -45,6 +45,9 @@
 #include "tools/Citations.h"
 #include "ExchangePatterns.h"
 #include "tools/IFile.h"
+#include "multicolvar/MultiColvarBase.h"
+#include "vesselbase/StoreDataVessel.h"
+#include "vesselbase/ActionWithVessel.h"
 
 using namespace std;
 
@@ -477,18 +480,141 @@ void PlumedMain::cmd(const std::string & word,void*val){
 ////////////////////////////////////////////////////////////////////////
 
 void PlumedMain::grab_dimension( const std::string& key, int* ndim, int* dims  ){
-  if( key=="positions" ){
+  int parlevel=0;
+  std::vector<std::string> c;
+  c = Tools::getWords(key," ,\n\t",&parlevel);
+  if( c[0]=="positions" ){
       *ndim=2; dims[0]=atoms.getNatoms(); dims[1]=3;
+  } else if (c[0]=="vessels"){
+     *ndim=2;
+     string a=c[1];
+     vesselbase::ActionWithVessel* mves= this->getActionSet().selectWithLabel<vesselbase::ActionWithVessel*>(a);
+     if(!mves) plumed_merror("action labelled " +  a + " does not exist or does not have vessels");
+     multicolvar::MultiColvarBase* mycolv;
+     mycolv = dynamic_cast<multicolvar::MultiColvarBase*>( mves );
+     if(!mycolv) plumed_merror("action labeled " + mycolv->getLabel() + " is not a multicolvar");
+     if( mycolv->weightWithDerivatives() ){
+        dims[1]=mycolv->getNumberOfQuantities();
+     } else {
+        dims[1]=mycolv->getNumberOfQuantities()-1;
+     }
+     dims[0]=mycolv->getFullNumberOfTasks();
+  } else {
+     *ndim=1;
+     // Initialize dimension to zero
+     dims[0]=0;
+     for(unsigned i=0;i<c.size();i++){
+        std::size_t dot=c[i].find_first_of('.');
+        string a=c[i].substr(0,dot);
+        string name=c[i].substr(dot+1);
+        // if it contains a dot:
+        if(c[i].find(".")!=string::npos){
+         	// Take all components
+         	if ( name=="*" ){
+              ActionWithValue* action=this->getActionSet().selectWithLabel<ActionWithValue*>(a);
+              dims[0] += action->getNumberOfComponents();
+         	// Take values with a specific name
+           } else {
+              ActionWithValue* action=this->getActionSet().selectWithLabel<ActionWithValue*>(a);
+              if(!action){
+         	      std::string str=" (hint! the actions in this ActionSet are: "; 
+         	      str+=this->getActionSet().getLabelList()+")";
+         	      plumed_merror("cannot find action named " + a +str);
+         	   } 
+         	   if( !(action->exists(c[i])) ){
+         	      std::string str=" (hint! the components in this actions are: "; 
+         	      str+=action->getComponentsList()+")";
+         	      plumed_merror("action " + a + " has no component named " + name + str);
+         	   } ;
+              dims[0] += 1;
+           }
+        // if it doesn't contain a dot:
+        } else {
+           ActionWithValue* action=this->getActionSet().selectWithLabel<ActionWithValue*>(a);
+           if(!action){
+         	   std::string str=" (hint! the actions in this ActionSet are: "; 
+         	   str+=this->getActionSet().getLabelList()+")";
+         	   plumed_merror("cannot find action named " + c[i] + str );
+         	}
+         	if( !(action->exists(c[i])) ){
+         	   std::string str=" (hint! the components in this actions are: "; 
+         	   str+=action->getComponentsList()+")";
+         	   plumed_merror("action " + c[i] + " has no component named " + c[i] +str);
+         	};
+           if (action->getNumberOfComponents()!=1) {
+         	   plumed_merror("action " + c[i] + " has components! Specify one of them.");
+           }
+           dims[0] += 1; 
+        }
+     }
   }
 }
 
 void PlumedMain::grab_data( const std::string& key, void* outval ){
+  double* p;
+  if( atoms.getRealPrecision()==sizeof(double)) p=static_cast<double*>( outval );
+  else if( atoms.getRealPrecision()==sizeof(float)) plumed_merror("yeah this needs fixing");    //float* p=static_cast<float*>( outval );
+  else plumed_merror("Unknown real precision type");
+
+  int parlevel=0;
+  std::vector<std::string> c;
+  c = Tools::getWords(key," ,\n\t",&parlevel);
+
   if( key=="positions" ){
-      double* p;
-      if( atoms.getRealPrecision()==sizeof(double)) p=static_cast<double*>( outval );
-      else if( atoms.getRealPrecision()==sizeof(float)) plumed_merror("yeah this needs fixing");    //float* p=static_cast<float*>( outval );
-      else plumed_merror("Unknown real precision type");
-      for(unsigned i=0;i<64*3;++i) p[i]=static_cast<double>(i); 
+     for(unsigned i=0;i<64*3;++i) p[i]=static_cast<double>(i); 
+  } else if (c[0]=="vessels"){
+     string a=c[1];
+     // Assign action
+     vesselbase::ActionWithVessel* mves= this->getActionSet().selectWithLabel<vesselbase::ActionWithVessel*>(a);
+     if(!mves) plumed_merror("action labelled " +  a + " does not exist or does not have vessels");
+     // Create multicolvar
+     multicolvar::MultiColvarBase* mycolv;
+     mycolv = dynamic_cast<multicolvar::MultiColvarBase*>( mves );
+     // Vessel base to store values of multicolvar
+     vesselbase::StoreDataVessel* stash=dynamic_cast<vesselbase::StoreDataVessel*>( mves->buildDataStashes( false, 0.0, NULL )  );
+     std::vector<double> cvals( mycolv->getNumberOfQuantities() );
+     // Calculate
+     mves->calculate();
+     unsigned k=0;
+     for(unsigned i=0;i<mycolv->getFullNumberOfTasks();++i){
+        stash->retrieveValue( i, true, cvals );
+        if( mycolv->weightWithDerivatives() ){
+          for(unsigned j=0;j<cvals.size();++j) {
+             p[k]= static_cast<double>(cvals[j]);
+             k++;
+          }
+        } else {
+          for(unsigned j=1;j<cvals.size();++j) {
+             p[k]= static_cast<double>(cvals[j]);
+             k++;
+          }
+        }
+     }  
+  } else {
+     unsigned offsetDim=0;
+     for(unsigned i=0;i<c.size();i++){
+        std::size_t dot=c[i].find_first_of('.');
+        string a=c[i].substr(0,dot);
+        string name=c[i].substr(dot+1);
+        // If it contains a dot
+        if(c[i].find(".")!=string::npos){    // if it contains a dot:
+           // Take components from all actions with a specific name
+           if ( name=="*" ){
+              ActionWithValue* action=this->getActionSet().selectWithLabel<ActionWithValue*>(a);
+              for(unsigned i=0;i<action->getNumberOfComponents();++i) p[offsetDim+i]=static_cast<double> (action->getOutputQuantity(i) ) ; 
+              offsetDim += action->getNumberOfComponents();
+           // Take values with a specific name
+           } else {
+              ActionWithValue* action=this->getActionSet().selectWithLabel<ActionWithValue*>(a);
+              p[offsetDim]=static_cast<double> (action->getOutputQuantity(name));
+              offsetDim += 1;
+           }
+        } else {
+           ActionWithValue* action=this->getActionSet().selectWithLabel<ActionWithValue*>(a);
+           p[offsetDim]=static_cast<double> (action->getOutputQuantity(0) ) ; 
+           offsetDim += 1;
+        } 
+     }
   }
 }
 
