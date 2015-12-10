@@ -4,8 +4,8 @@ import sys
 import time
 
 import numpy as np
-from plumed import *
-from tools import *
+import plumed
+from plumed import tools
 
 # Read XYZ
 filename= os.path.join(
@@ -13,7 +13,7 @@ filename= os.path.join(
     os.pardir,
     os.pardir,
     "regtest", "crystallization", "rt-q6", "64.xyz")
-atom_type, pos = read_xyz(filename)
+atom_type, pos = tools.read_xyz(filename)
 
 # Define a few things
 step=0
@@ -26,7 +26,7 @@ virial=np.zeros((3,3),dtype=float)
 num_loops = 1#50
 
 # Create the class only once
-plumed = Plumed()
+plumed = plumed.Plumed()
 
 # Start time
 t1 = time.time()
@@ -61,14 +61,20 @@ for idx in range(num_loops):
 
     # Init
     plumed.cmd("init")
-    # New command by Pablo Piaggi to send direclty commands that would be written
-    # in the input file.
+
+    # "action": new command by Pablo Piaggi to send directly commands 
+    # that would be normally written in the input file.
+
     # Check if atoms were correctly received by Plumed.
-    plumed.cmd("action","DUMPATOMS ATOMS=1-64 FILE=testout.xyz")
+    # plumed.cmd("action","DUMPATOMS ATOMS=1-64 FILE=testout.xyz")
+
     # Calculate Q6
-    plumed.cmd("action","Q6 SPECIES=1-32 D_0=3.0 R_0=1.5 MEAN MIN={BETA=0.1} LABEL=q6") 
+    plumed.cmd("action",
+               "Q6 SPECIES=1-32 D_0=3.0 R_0=1.5 MEAN MIN={BETA=0.1} LABEL=q6") 
+    # Write on file
     plumed.cmd("action","PRINT ARG=q6.* FILE=colv")
     plumed.cmd("action","DUMPMULTICOLVAR DATA=q6 FILE=MULTICOLVAR.xyz")
+
     # Post-init settings
     plumed.cmd("setStep",step)
     plumed.cmd("setBox",box)
@@ -77,6 +83,7 @@ for idx in range(num_loops):
     plumed.cmd("setCharges", charges)
     plumed.cmd("setForces", forces)
     plumed.cmd("setVirial", virial)
+
     # Calculate
     plumed.cmd("calc")
 
