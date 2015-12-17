@@ -23,6 +23,7 @@
 #define __PLUMED_core_ActionSet_h
 
 #include "Action.h"
+#include "Value.h"
 
 namespace PLMD {
 
@@ -64,6 +65,8 @@ public:
   std::string getLabelList() const;
 /// get the labels in the form of a vector of strings  
   std::vector<std::string> getLabelVector() const;
+/// Get the arguments for a given set of labels
+  void interpretArgumentList(const std::vector<std::string>& c, std::vector<Value*>&arg, Action* myaction ) const ;
 };
 
 /////

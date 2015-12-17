@@ -1,4 +1,4 @@
-USE=config tools
+USE=config tools vesselbase
 
 # generic makefile
 include ../maketools/make.module

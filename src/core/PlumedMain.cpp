@@ -31,6 +31,7 @@
 #include <set>
 #include "config/Config.h"
 #include <cstdlib>
+#include <stdint.h>
 #include "ActionRegister.h"
 #include "GREX.h"
 #include "tools/Exception.h"
@@ -44,10 +45,12 @@
 #include "tools/Citations.h"
 #include "ExchangePatterns.h"
 #include "tools/IFile.h"
+#include "vesselbase/ActionWithVessel.h"
+#include "vesselbase/StoreDataVessel.h"
 
 using namespace std;
 
-enum { SETBOX, SETPOSITIONS, SETMASSES, SETCHARGES, SETPOSITIONSX, SETPOSITIONSY, SETPOSITIONSZ, SETVIRIAL, SETENERGY, SETFORCES, SETFORCESX, SETFORCESY, SETFORCESZ, CALC, PREPAREDEPENDENCIES, SHAREDATA, PREPARECALC, PERFORMCALC, SETSTEP, SETSTEPLONG, SETATOMSNLOCAL, SETATOMSGATINDEX, SETATOMSFGATINDEX, SETATOMSCONTIGUOUS, CREATEFULLLIST, GETFULLLIST, CLEARFULLLIST, READ, CLEAR, GETAPIVERSION, INIT, SETREALPRECISION, SETMDLENGTHUNITS, SETMDENERGYUNITS, SETMDTIMEUNITS, SETNATURALUNITS, SETNOVIRIAL, SETPLUMEDDAT, SETMPICOMM, SETMPIFCOMM, SETMPIMULTISIMCOMM, SETNATOMS, SETTIMESTEP, SETMDENGINE, SETLOG, SETLOGFILE, SETSTOPFLAG, GETEXCHANGESFLAG, SETEXCHANGESSEED, SETNUMBEROFREPLICAS, GETEXCHANGESLIST, RUNFINALJOBS, ISENERGYNEEDED, GETBIAS, SETKBT, SETRESTART };
+enum { SETBOX, SETPOSITIONS, SETMASSES, SETCHARGES, SETPOSITIONSX, SETPOSITIONSY, SETPOSITIONSZ, SETVIRIAL, SETENERGY, SETFORCES, SETFORCESX, SETFORCESY, SETFORCESZ, CALC, PREPAREDEPENDENCIES, SHAREDATA, PREPARECALC, PERFORMCALC, SETSTEP, SETSTEPLONG, SETATOMSNLOCAL, SETATOMSGATINDEX, SETATOMSFGATINDEX, SETATOMSCONTIGUOUS, CREATEFULLLIST, GETFULLLIST, CLEARFULLLIST, READ, CREATEACTION, CLEAR, GETAPIVERSION, GETINTEGERPRECISION, INIT, SETREALPRECISION, SETMDLENGTHUNITS, SETMDENERGYUNITS, SETMDTIMEUNITS, SETNATURALUNITS, SETNOVIRIAL, SETPLUMEDDAT, SETMPICOMM, SETMPIFCOMM, SETMPIMULTISIMCOMM, SETNATOMS, SETTIMESTEP, SETMDENGINE, SETLOG, SETLOGFILE, SETSTOPFLAG, GETEXCHANGESFLAG, SETEXCHANGESSEED, SETNUMBEROFREPLICAS, GETEXCHANGESLIST, RUNFINALJOBS, ISENERGYNEEDED, GETBIAS, SETKBT, SETRESTART };
 
 namespace PLMD{
 
@@ -63,6 +66,7 @@ PlumedMain::PlumedMain():
   citations(*new Citations),
   step(0),
   active(false),
+  grabbing(false),
   atoms(*new Atoms(*this)),
   actionSet(*new ActionSet(*this)),
   bias(0.0),
@@ -107,8 +111,10 @@ PlumedMain::PlumedMain():
   word_map["getFullList"]=GETFULLLIST;
   word_map["clearFullList"]=CLEARFULLLIST;
   word_map["read"]=READ;
+  word_map["createAction"]=CREATEACTION;
   word_map["clear"]=CLEAR;
   word_map["getApiVersion"]=GETAPIVERSION;
+  word_map["getIntegerPrecision"]=GETINTEGERPRECISION;
   word_map["init"]=INIT;
   word_map["setRealPrecision"]=SETREALPRECISION;
   word_map["setMDLengthUnits"]=SETMDLENGTHUNITS;
@@ -295,6 +301,10 @@ void PlumedMain::cmd(const std::string & word,void*val){
         if(val)readInputFile(static_cast<char*>(val));
         else   readInputFile("plumed.dat");
         break;
+      case CREATEACTION:
+        CHECK_INIT(initialized,word);
+        if(val)readAction(static_cast<char*>(val));
+        break;
       case CLEAR:
         CHECK_INIT(initialized,word);
         actionSet.clearDelete();
@@ -302,6 +312,10 @@ void PlumedMain::cmd(const std::string & word,void*val){
       case GETAPIVERSION:
         CHECK_NULL(val,word);
         *(static_cast<int*>(val))=3;
+        break;
+      case GETINTEGERPRECISION:
+        CHECK_NULL(val,word);
+        *(static_cast<uint8_t*>(val))=(sizeof(int));
         break;
       // commands which can be used only before initialization:
       case INIT:
@@ -445,6 +459,12 @@ void PlumedMain::cmd(const std::string & word,void*val){
     int check=0;
     if(actionRegister().check(words[1])) check=1;
     *(static_cast<int*>(val))=check;
+  } else if(nw==2 && words[0]=="grabDataShape"){
+    CHECK_INIT(initialized,words[0]);
+    grab_shape( words[1], static_cast<int*>(val) );
+  } else if(nw==2 && words[0]=="grabData"){
+    CHECK_INIT(initialized,words[0]);
+    grab_data( words[1], val );
   } else if(nw>1 && words[0]=="GREX"){
     if(!grex) grex=new GREX(*this);
     plumed_massert(grex,"error allocating grex");
@@ -461,6 +481,51 @@ void PlumedMain::cmd(const std::string & word,void*val){
     plumed_merror("cannot interpret cmd(\"" + word + "\"). check plumed developers manual to see the available commands.");
   };
  stopwatch.pause();
+}
+
+////////////////////////////////////////////////////////////////////////
+
+void PlumedMain::grab_shape( const std::string& key, int* dims  ){
+  std::vector<std::string> words=Tools::getWords(key,"\t\n ,"); 
+  grabbing=false; prepareDependencies(); grabbing=true;
+  vesselbase::ActionWithVessel* myv=actionSet.selectWithLabel<vesselbase::ActionWithVessel*>( words[0] );
+  if( myv ){
+     plumed_assert( words.size()==1 );
+     dims[0]=2; vesselbase::ActionWithVessel* myv=actionSet.selectWithLabel<vesselbase::ActionWithVessel*>( words[0] );
+     plumed_assert( myv ); dims[1]=myv->getFullNumberOfTasks(); dims[2]=myv->getNumberOfQuantities();
+     myv->buildDataStashes( false, 0.0, NULL ); myv->activate();
+  } else {
+     std::vector<Value*> arg; actionSet.interpretArgumentList(words, arg, NULL );
+     plumed_assert( arg.size()>0 ); dims[0]=1; dims[1]=arg.size(); 
+     for(unsigned i=0;i<arg.size();++i) (arg[i]->getPntrToAction())->activate();
+  }
+}
+
+void PlumedMain::grab_data( const std::string& key, void* outval ){
+  calc();  // Run the plumed calculation
+
+  double* p; if( atoms.getRealPrecision()==sizeof(double)) p=static_cast<double*>( outval );
+  std::vector<std::string> words=Tools::getWords(key,"\t\n ,"); 
+  vesselbase::ActionWithVessel* myv=actionSet.selectWithLabel<vesselbase::ActionWithVessel*>( words[0] );
+  if( myv ){ 
+      plumed_assert( words.size()==1 );
+      vesselbase::ActionWithVessel* myv=actionSet.selectWithLabel<vesselbase::ActionWithVessel*>( words[0] );
+      plumed_assert( myv ); unsigned k=0; std::vector<double> myvals( myv->getNumberOfQuantities() );
+      vesselbase::StoreDataVessel* vv;
+      for(unsigned k=0;k<myv->getNumberOfVessels();++k){
+          vv=dynamic_cast<vesselbase::StoreDataVessel*>( myv->getPntrToVessel(k) );
+          if( vv ) break;
+      }
+      plumed_massert( vv, "error did not find data stash"); 
+
+      for(unsigned i=0;i<myv->getFullNumberOfTasks();++i){
+          vv->retrieveValue( i, true, myvals );
+          for(unsigned j=0;j<myv->getNumberOfQuantities();++j){ p[k]=myvals[j]; k++; }
+      }
+  } else {
+      std::vector<Value*> arg; actionSet.interpretArgumentList(words, arg, NULL );
+      plumed_assert( arg.size()>0 ); for(unsigned i=0;i<arg.size();++i) p[i]=arg[i]->get();
+  } 
 }
 
 ////////////////////////////////////////////////////////////////////////
@@ -514,6 +579,14 @@ void PlumedMain::readInputFile(std::string str){
   log.flush();	
 
   pilots=actionSet.select<ActionPilot*>();
+}
+
+void PlumedMain::readAction(std::string str) {
+  plumed_assert(initialized);
+  int parlevel=0;
+  std::vector<std::string> words_tmp;
+  words_tmp = Tools::getWords(str,NULL,&parlevel);
+  readInputWords(words_tmp);
 }
 
 void PlumedMain::readInputWords(const std::vector<std::string> & words){
@@ -575,20 +648,24 @@ void PlumedMain::prepareDependencies(){
 // new/changed dependency (up to now, only useful for dependences on virtual atoms,
 // which can be dynamically changed).
 
-// First switch off all actions
-  for(ActionSet::iterator p=actionSet.begin();p!=actionSet.end();++p){
-     (*p)->deactivate();
-     (*p)->clearOptions();
-  }
+  if( !grabbing ){ 
+      // First switch off all actions
+      for(ActionSet::iterator p=actionSet.begin();p!=actionSet.end();++p){
+         (*p)->deactivate();
+         (*p)->clearOptions();
+      }
 
-// for optimization, an "active" flag remains false if no action at all is active
-  active=false;
-  for(unsigned i=0;i<pilots.size();++i){
-    if(pilots[i]->onStep()){
-      pilots[i]->activate();
+      // for optimization, an "active" flag remains false if no action at all is active
+      active=false;
+      for(unsigned i=0;i<pilots.size();++i){
+        if(pilots[i]->onStep()){
+          pilots[i]->activate();
+          active=true;
+         }
+      };
+  } else {
       active=true;
-     }
-  };
+  }
 
 // also, if one of them is the total energy, tell to atoms that energy should be collected
   for(ActionSet::iterator p=actionSet.begin();p!=actionSet.end();++p){

@@ -101,6 +101,9 @@ private:
 /// If at least one Action requires some work, this variable is set to true.
   bool active;
 
+/// 
+  bool grabbing;
+
 /// Name of the input file
   std::string plumedDat;
 
@@ -181,10 +184,21 @@ public:
   void cmd(const std::string&key,void*val=NULL);
   ~PlumedMain();
 /**
+*/
+  void grab_shape(const std::string& key, int* dims ); 
+/**
+*/
+  void grab_data(const std::string& key, void* outval );
+/**
   Read an input file.
   \param str name of the file
 */
   void readInputFile(std::string str);
+/**
+  Read a single action line
+  \param str is the line
+*/
+  void readAction(std::string str);
 /**
   Read an input string.
   \param str name of the string
