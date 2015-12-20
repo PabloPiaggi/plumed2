@@ -4,8 +4,8 @@ import sys
 import time
 
 import numpy as np
-from plumed import *
-from tools import *
+import plumed
+from plumed import tools
 
 # Read XYZ
 filename= os.path.join(
@@ -13,7 +13,7 @@ filename= os.path.join(
     os.pardir,
     os.pardir,
     "regtest", "crystallization", "rt-q6", "64.xyz")
-atom_type, pos = read_xyz(filename)
+atom_type, pos = tools.read_xyz(filename)
 
 # Define a few things
 step=0
@@ -23,10 +23,10 @@ virial=np.zeros((3,3),dtype=float)
 # Repeat the call multiple times to see if 
 # there are problems with multiple start/stop of the environment, and
 # for more accurate timing. Remember to delete the bck* files before running!
-num_loops = 1
+num_loops = 50
 
 # Create the class only once
-plumed = Plumed()
+plumed = plumed.Plumed()
 
 # Start time
 t1 = time.time()
@@ -45,7 +45,7 @@ for idx in range(num_loops):
     plumed.start_plumed()
 
     # Pre-init settings 
-    ## This one should be probably hiddend in the Plumed class
+    # This one should be probably hidden in the Plumed class
     plumed.cmd("setRealPrecision", 8) # float64
 
     plumed.cmd("setMDEngine","none")
@@ -53,13 +53,12 @@ for idx in range(num_loops):
     plumed.cmd("setKbT", 1.) # Not used but must be defined
     plumed.cmd("setNatoms",num_atoms)
     plumed.cmd("setPlumedDat","") # Empty, will use the 'action' command
-    # TODO: write to memory, or disable completely logging
-    plumed.cmd("setLogFile","test.log") # To avoid printing on screen
+    # TODO: write to memory
+    #plumed.cmd("setLogFile","test.log") # To avoid printing on screen
+    plumed.cmd("setLogFile","/dev/null") # To disable output completely
 
     # Init
     plumed.cmd("init")
-    # New command by Pablo Piaggi to send direclty commands that would be written
-    # in the input file.
     # Check if atoms were correctly received by Plumed.
     # plumed.cmd("action", "DUMPATOMS ATOMS=1-64 FILE=testout.xyz")
     # Calculate Q6
@@ -94,8 +93,3 @@ dt = (t2-t1)*1000. # ms
 print >>sys.stderr, "Total time: {:4.1f} ms".format(dt)
 print >>sys.stderr, "Num loops:  {:4d}".format(num_loops)
 print >>sys.stderr, "Time/loop:  {:4.1f} ms".format(dt/float(num_loops))
-
-# TO DO: Write wrapper for actions. For instance "DISTANCE LABEL=l6 ATOMS=3,4" = Distance(label="l6",atoms)
-# TO DO: Wrappers to get values back from actions. Very important!
-# TO DO: Perhaps have two options. plumed.setMasses(masses) = plumed.cmd("setMasses",masses) . The first would be more pythonic...
-# IDEAS AND TO DO: Retrieve results of calculation directly in plumed. Check how forces, etc. are passed back to the md code (I think that they are pointers). Remember that the bias is passed back to gromacs for replica exchange so we can also passed it to python (perhaps do the same for CVs?). Pass things back according to a label. Check how to delete actions.
