@@ -180,8 +180,10 @@ class Plumed(object):
         # API assumption: data is always float
         
 	# create a long string to grab data from plumed
-	gskey="grabDataShape " + key
-	gkey="grabData " + key	
+	gskey = "grabDataShape " + key
+	gkey = "setDataForGrab " + key	
+        ckey = "calc"
+        fvalue = None
 
         # ndims_c = self._c_int_type()
         shape = numpy.zeros((11,), dtype=self._int_type) # maximum # of dimensions is 10
@@ -204,6 +206,9 @@ class Plumed(object):
                 gkey.encode(encoding='UTF-8',errors='strict'))),
                 ct.byref(value_c))
 
+            _libplumed.plumed_cmd(ct.c_void_p(self._p), ct.c_char_p(bytes(
+                ckey.encode(encoding='UTF-8',errors='strict'))),
+	        fvalue)	
             return value_c.value
         else:
             # Array
@@ -212,6 +217,9 @@ class Plumed(object):
             _libplumed.plumed_cmd(ct.c_void_p(self._p), ct.c_char_p(bytes(
                 gkey.encode(encoding='UTF-8',errors='strict'))),
                 value_c)
+            _libplumed.plumed_cmd(ct.c_void_p(self._p), ct.c_char_p(bytes(
+                ckey.encode(encoding='UTF-8',errors='strict'))),
+                fvalue)
             return value
             
         

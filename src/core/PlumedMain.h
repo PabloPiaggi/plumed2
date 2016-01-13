@@ -61,6 +61,7 @@ class Stopwatch;
 class Citations;
 class ExchangePatterns;
 class FileBase;
+class DataGrabbingObject;
 
 /**
 Main plumed object.
@@ -101,14 +102,14 @@ private:
 /// If at least one Action requires some work, this variable is set to true.
   bool active;
 
-/// 
-  bool grabbing;
-
 /// Name of the input file
   std::string plumedDat;
 
 /// Object containing information about atoms (such as positions,...).
   Atoms&    atoms;           // atomic coordinates
+
+/// Object containing data we would like to grab and pass back
+  DataGrabbingObject* mygrabdata;
 
 /// Set of actions found in plumed.dat file
   ActionSet& actionSet;
@@ -183,12 +184,6 @@ public:
 */
   void cmd(const std::string&key,void*val=NULL);
   ~PlumedMain();
-/**
-*/
-  void grab_shape(const std::string& key, int* dims ); 
-/**
-*/
-  void grab_data(const std::string& key, void* outval );
 /**
   Read an input file.
   \param str name of the file

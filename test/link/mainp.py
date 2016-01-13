@@ -74,7 +74,7 @@ for idx in range(num_loops):
     plumed.cmd("setForces", forces)
     plumed.cmd("setVirial", virial)
     # Calculate
-    plumed.cmd("calc")
+    # plumed.cmd("calc")
 
     # TODO: here get values instead of reading files
     positions = plumed.grab("q6.mean")

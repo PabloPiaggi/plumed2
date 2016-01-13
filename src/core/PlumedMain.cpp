@@ -45,8 +45,7 @@
 #include "tools/Citations.h"
 #include "ExchangePatterns.h"
 #include "tools/IFile.h"
-#include "vesselbase/ActionWithVessel.h"
-#include "vesselbase/StoreDataVessel.h"
+#include "DataGrabbingObject.h"
 
 using namespace std;
 
@@ -66,7 +65,6 @@ PlumedMain::PlumedMain():
   citations(*new Citations),
   step(0),
   active(false),
-  grabbing(false),
   atoms(*new Atoms(*this)),
   actionSet(*new ActionSet(*this)),
   bias(0.0),
@@ -81,6 +79,7 @@ PlumedMain::PlumedMain():
 {
   log.link(comm);
   log.setLinePrefix("PLUMED: ");
+  mygrabdata=DataGrabbingObject::create(sizeof(double),*this);
   stopwatch.start();
   stopwatch.pause();
   word_map["setBox"]=SETBOX;
@@ -147,6 +146,7 @@ PlumedMain::~PlumedMain(){
   stopwatch.start();
   stopwatch.stop();
   if(initialized) log<<stopwatch;
+  delete mygrabdata;
   delete &exchangePatterns;
   delete &actionSet;
   delete &citations;
@@ -326,6 +326,8 @@ void PlumedMain::cmd(const std::string & word,void*val){
         CHECK_NOTINIT(initialized,word);
         CHECK_NULL(val,word);
         atoms.setRealPrecision(*static_cast<int*>(val));
+        delete mygrabdata;
+        mygrabdata=DataGrabbingObject::create(sizeof(double),*this); 
         break;
       case SETMDLENGTHUNITS:
         CHECK_NOTINIT(initialized,word);
@@ -461,10 +463,10 @@ void PlumedMain::cmd(const std::string & word,void*val){
     *(static_cast<int*>(val))=check;
   } else if(nw==2 && words[0]=="grabDataShape"){
     CHECK_INIT(initialized,words[0]);
-    grab_shape( words[1], static_cast<int*>(val) );
-  } else if(nw==2 && words[0]=="grabData"){
+    DataGrabbingObject::grab_shape( actionSet, words[1], static_cast<int*>(val) );
+  } else if(nw==2 && words[0]=="setDataForGrab"){
     CHECK_INIT(initialized,words[0]);
-    grab_data( words[1], val );
+    mygrabdata->setData( words[1], val );
   } else if(nw>1 && words[0]=="GREX"){
     if(!grex) grex=new GREX(*this);
     plumed_massert(grex,"error allocating grex");
@@ -481,51 +483,6 @@ void PlumedMain::cmd(const std::string & word,void*val){
     plumed_merror("cannot interpret cmd(\"" + word + "\"). check plumed developers manual to see the available commands.");
   };
  stopwatch.pause();
-}
-
-////////////////////////////////////////////////////////////////////////
-
-void PlumedMain::grab_shape( const std::string& key, int* dims  ){
-  std::vector<std::string> words=Tools::getWords(key,"\t\n ,"); 
-  grabbing=false; prepareDependencies(); grabbing=true;
-  vesselbase::ActionWithVessel* myv=actionSet.selectWithLabel<vesselbase::ActionWithVessel*>( words[0] );
-  if( myv ){
-     plumed_assert( words.size()==1 );
-     dims[0]=2; vesselbase::ActionWithVessel* myv=actionSet.selectWithLabel<vesselbase::ActionWithVessel*>( words[0] );
-     plumed_assert( myv ); dims[1]=myv->getFullNumberOfTasks(); dims[2]=myv->getNumberOfQuantities();
-     myv->buildDataStashes( false, 0.0, NULL ); myv->activate();
-  } else {
-     std::vector<Value*> arg; actionSet.interpretArgumentList(words, arg, NULL );
-     plumed_assert( arg.size()>0 ); dims[0]=1; dims[1]=arg.size(); 
-     for(unsigned i=0;i<arg.size();++i) (arg[i]->getPntrToAction())->activate();
-  }
-}
-
-void PlumedMain::grab_data( const std::string& key, void* outval ){
-  calc();  // Run the plumed calculation
-
-  double* p; if( atoms.getRealPrecision()==sizeof(double)) p=static_cast<double*>( outval );
-  std::vector<std::string> words=Tools::getWords(key,"\t\n ,"); 
-  vesselbase::ActionWithVessel* myv=actionSet.selectWithLabel<vesselbase::ActionWithVessel*>( words[0] );
-  if( myv ){ 
-      plumed_assert( words.size()==1 );
-      vesselbase::ActionWithVessel* myv=actionSet.selectWithLabel<vesselbase::ActionWithVessel*>( words[0] );
-      plumed_assert( myv ); unsigned k=0; std::vector<double> myvals( myv->getNumberOfQuantities() );
-      vesselbase::StoreDataVessel* vv;
-      for(unsigned k=0;k<myv->getNumberOfVessels();++k){
-          vv=dynamic_cast<vesselbase::StoreDataVessel*>( myv->getPntrToVessel(k) );
-          if( vv ) break;
-      }
-      plumed_massert( vv, "error did not find data stash"); 
-
-      for(unsigned i=0;i<myv->getFullNumberOfTasks();++i){
-          vv->retrieveValue( i, true, myvals );
-          for(unsigned j=0;j<myv->getNumberOfQuantities();++j){ p[k]=myvals[j]; k++; }
-      }
-  } else {
-      std::vector<Value*> arg; actionSet.interpretArgumentList(words, arg, NULL );
-      plumed_assert( arg.size()>0 ); for(unsigned i=0;i<arg.size();++i) p[i]=arg[i]->get();
-  } 
 }
 
 ////////////////////////////////////////////////////////////////////////
@@ -648,24 +605,20 @@ void PlumedMain::prepareDependencies(){
 // new/changed dependency (up to now, only useful for dependences on virtual atoms,
 // which can be dynamically changed).
 
-  if( !grabbing ){ 
-      // First switch off all actions
-      for(ActionSet::iterator p=actionSet.begin();p!=actionSet.end();++p){
-         (*p)->deactivate();
-         (*p)->clearOptions();
-      }
-
-      // for optimization, an "active" flag remains false if no action at all is active
-      active=false;
-      for(unsigned i=0;i<pilots.size();++i){
-        if(pilots[i]->onStep()){
-          pilots[i]->activate();
-          active=true;
-         }
-      };
-  } else {
-      active=true;
+  // First switch off all actions
+  for(ActionSet::iterator p=actionSet.begin();p!=actionSet.end();++p){
+     (*p)->deactivate();
+     (*p)->clearOptions();
   }
+
+  // for optimization, an "active" flag remains false if no action at all is active
+  active=mygrabdata->activate();
+  for(unsigned i=0;i<pilots.size();++i){
+    if(pilots[i]->onStep()){
+      pilots[i]->activate();
+      active=true;
+     }
+  };
 
 // also, if one of them is the total energy, tell to atoms that energy should be collected
   for(ActionSet::iterator p=actionSet.begin();p!=actionSet.end();++p){
@@ -689,6 +642,7 @@ void PlumedMain::performCalc(){
   waitData();
   justCalculate();
   justApply();
+  mygrabdata->finishDataGrab();
 }
 
 void PlumedMain::waitData(){
