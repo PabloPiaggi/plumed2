@@ -125,11 +125,11 @@ void DataGrabbingObjectTyped<T>::finishDataGrab(){
           unsigned k=0; std::vector<double> myvals( myv->getNumberOfQuantities() );
           for(unsigned i=0;i<myv->getFullNumberOfTasks();++i){
               vv->retrieveValue( i, true, myvals );
-              for(unsigned j=0;j<myv->getNumberOfQuantities();++j){ p[k]=myvals[j]; k++; }
+              for(unsigned j=0;j<myv->getNumberOfQuantities();++j){ p[k]=static_cast<T>(myvals[j]); k++; }
           } 
       } else {
           std::vector<Value*> arg; plumed.getActionSet().interpretArgumentList(words, arg, NULL );
-          plumed_assert( arg.size()>0 ); for(unsigned i=0;i<arg.size();++i) p[i]=arg[i]->get();
+          plumed_assert( arg.size()>0 ); for(unsigned i=0;i<arg.size();++i) p[i]=static_cast<T>(arg[i]->get());
       }
   }
 }
