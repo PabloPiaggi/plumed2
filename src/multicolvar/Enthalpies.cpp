@@ -39,22 +39,25 @@ namespace multicolvar{
 //+ENDPLUMEDOC
 
 
-class Energies : public MultiColvarBase {
+class Enthalpies : 
+   public MultiColvarBase
+   {
 private:
-  double rcut2;
+  double rcut2, pressure;
 public:
   static void registerKeywords( Keywords& keys );
-  explicit Energies(const ActionOptions&);
+  explicit Enthalpies(const ActionOptions&);
 // active methods:
   virtual double compute( const unsigned& tindex, AtomValuePack& myatoms ) const ; 
 /// Returns the number of coordinates of the field
   bool isPeriodic(){ return false; }
 };
 
-PLUMED_REGISTER_ACTION(Energies,"ENERGIES")
+PLUMED_REGISTER_ACTION(Enthalpies,"ENTHALPIES")
 
-void Energies::registerKeywords( Keywords& keys ){
+void Enthalpies::registerKeywords( Keywords& keys ){
   MultiColvarBase::registerKeywords( keys );
+  keys.add("compulsory","PRESSURE","0.","Pressure");
   keys.use("SPECIES"); keys.use("SPECIESA"); keys.use("SPECIESB");
   // Use actionWithDistributionKeywords
   keys.use("MEAN"); keys.use("MORE_THAN"); keys.use("LESS_THAN"); keys.use("MAX");
@@ -62,17 +65,22 @@ void Energies::registerKeywords( Keywords& keys ){
   keys.use("ALT_MIN"); keys.use("LOWEST"); keys.use("HIGHEST"); 
 }
 
-Energies::Energies(const ActionOptions&ao):
+Enthalpies::Enthalpies(const ActionOptions&ao):
 Action(ao),
 MultiColvarBase(ao)
 {
+  // Parse the pressure
+  parse("PRESSURE",pressure);
+  log.printf("The pressure is %f . \n", pressure );
+
   // And setup the ActionWithVessel
   setLinkCellCutoff( 10.0 );
   std::vector<AtomNumber> all_atoms; setupMultiColvarBase( all_atoms ); checkRead();
 }
 
-double Energies::compute( const unsigned& tindex, AtomValuePack& myatoms ) const {
-   return getEnergyAtom(myatoms.getIndex(0));
+double Enthalpies::compute( const unsigned& tindex, AtomValuePack& myatoms ) const {
+   double volume=getBox().determinant();
+   return getEnergyAtom(myatoms.getIndex(0)) + pressure*volume/getNumberOfAtoms();
 }
 
 }
