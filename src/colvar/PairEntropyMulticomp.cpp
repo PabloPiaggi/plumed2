@@ -65,6 +65,7 @@ PAIRENTROPY ...
 class PairEntropyMulticomp : public Colvar {
   bool pbc;
   bool serial;
+  bool do_pairs;
   NeighborList *nl;
   bool invalidateList;
   bool firsttime;
@@ -95,8 +96,8 @@ PLUMED_REGISTER_ACTION(PairEntropyMulticomp,"PAIRENTROPY_MULTICOMP")
 void PairEntropyMulticomp::registerKeywords( Keywords& keys ){
   Colvar::registerKeywords(keys);
   keys.addFlag("SERIAL",false,"Perform the calculation in serial - for debug purpose");
-  keys.addFlag("PAIR",false,"Pair only 1st element of the 1st group with 1st element in the second, etc");
   keys.addFlag("NLIST",false,"Use a neighbour list to speed up the calculation");
+  keys.addFlag("INDIVIDUAL_PAIRS",false,"Obtain pair entropy of AA, AB, and BB pairs");
   keys.add("optional","NL_CUTOFF","The cutoff for the neighbour list");
   keys.add("optional","NL_STRIDE","The frequency with which we are updating the atoms in the neighbour list");
   keys.add("atoms","GROUPA","First list of atoms");
@@ -104,17 +105,25 @@ void PairEntropyMulticomp::registerKeywords( Keywords& keys ){
   keys.add("compulsory","MAXR","1","Maximum distance for the radial distribution function ");
   keys.add("compulsory","NHIST","1","Number of bins in the rdf ");
   keys.add("compulsory","SIGMA","0.1","Width of gaussians ");
+  keys.addOutputComponent("pairAA","INDIVIDUAL_PAIRS","Pair AA contribution to the multicomponent pair entropy");
+  keys.addOutputComponent("pairAB","INDIVIDUAL_PAIRS","Pair AB contribution to the multicomponent pair entropy");
+  keys.addOutputComponent("pairBB","INDIVIDUAL_PAIRS","Pair BB contribution to the multicomponent pair entropy");
+  keys.addOutputComponent("full","INDIVIDUAL_PAIRS","Total multicomponent pair entropy");
+
 }
 
 PairEntropyMulticomp::PairEntropyMulticomp(const ActionOptions&ao):
 PLUMED_COLVAR_INIT(ao),
 pbc(true),
 serial(false),
+do_pairs(false),
 invalidateList(true),
 firsttime(true)
 {
 
   parseFlag("SERIAL",serial);
+  parseFlag("INDIVIDUAL_PAIRS",do_pairs);
+  if (do_pairs) log.printf("Calculating individual components for each pair AA, AB, and BB. \n");
 
   vector<AtomNumber> ga_lista,gb_lista,full_lista;
   parseAtomList("GROUPA",ga_lista);
@@ -123,10 +132,6 @@ firsttime(true)
   bool nopbc=!pbc;
   parseFlag("NOPBC",nopbc);
   pbc=!nopbc;
-
-// pair stuff
-  bool dopair=false;
-  parseFlag("PAIR",dopair);
 
 // neighbor list stuff
   bool doneigh=false;
@@ -139,7 +144,6 @@ firsttime(true)
    parse("NL_STRIDE",nl_st);
    if(nl_st<=0) error("NL_STRIDE should be explicitly specified and positive");
   }
-  addValueWithDerivatives(); setNotPeriodic();
  
   // Construct full list 
   full_lista.reserve ( ga_lista.size() + gb_lista.size() );
@@ -170,7 +174,6 @@ firsttime(true)
   log.printf("  \n");
   if(pbc) log.printf("  using periodic boundary conditions\n");
   else    log.printf("  without periodic boundary conditions\n");
-  if(dopair) log.printf("  with PAIR option\n");
   if(doneigh){
    log.printf("  using neighbor lists with\n");
    log.printf("  update every %d steps and cutoff %f\n",nl_st,nl_cut);
@@ -198,6 +201,16 @@ firsttime(true)
   sigmaSqr = sigma*sigma;
   deltar=maxr/nhist;
   deltaBin = std::floor(3*sigma/deltar); // 3*sigma is hard coded
+
+  // Define output components
+  if (do_pairs) {
+    addComponentWithDerivatives("pairAA"); componentIsNotPeriodic("pairAA");
+    addComponentWithDerivatives("pairAB"); componentIsNotPeriodic("pairAB");
+    addComponentWithDerivatives("pairBB"); componentIsNotPeriodic("pairBB");
+    addComponentWithDerivatives("full"); componentIsNotPeriodic("full");
+  } else {
+    addValueWithDerivatives(); setNotPeriodic();
+  }
 }
 
 PairEntropyMulticomp::~PairEntropyMulticomp(){
@@ -223,9 +236,16 @@ void PairEntropyMulticomp::prepare(){
 void PairEntropyMulticomp::calculate()
 {
   // Define output quantities
-  double pairEntropy;
-  vector<Vector> deriv(getNumberOfAtoms());
-  Tensor virial;
+  //double pairEntropy;
+  vector<Vector> derivAA(getNumberOfAtoms());
+  vector<Vector> derivAB(getNumberOfAtoms());
+  vector<Vector> derivBB(getNumberOfAtoms());
+  //Tensor virial;
+  //if (do_pairs){
+  //  Tensor virialAA;
+  //  Tensor virialAB;
+  //  Tensor virialBB;
+  //}
   // Define intermediate quantities
   vector<double> gofrAA(nhist);
   vector<double> gofrAB(nhist);
@@ -391,59 +411,98 @@ void PairEntropyMulticomp::calculate()
   double prefactorAA = -2*pi*(densityA*densityA/density);
   double prefactorAB = -4*pi*(densityA*densityB/density);
   double prefactorBB = -2*pi*(densityB*densityB/density);
-  pairEntropy =  prefactorAA*integrate(integrandAA,deltar);
-  pairEntropy += prefactorAB*integrate(integrandAB,deltar);
-  pairEntropy += prefactorBB*integrate(integrandBB,deltar);
-  // Construct integrand and integrate derivatives
-  for(unsigned j=0;j<getNumberOfAtoms();++j) {
-    vector<Vector> integrandDerivativesAA(nhist);
-    vector<Vector> integrandDerivativesAB(nhist);
-    vector<Vector> integrandDerivativesBB(nhist);
-    for(unsigned k=0;k<nhist;++k){
-      double x=deltar*(k+0.5);
-      if (gofrAA[k]>1.e-10) { integrandDerivativesAA[k] = gofrPrimeAA[k][j]*logGofrAA[k]*x*x; }
-      if (gofrAB[k]>1.e-10) { integrandDerivativesAB[k] = gofrPrimeAB[k][j]*logGofrAB[k]*x*x; }
-      if (gofrBB[k]>1.e-10) { integrandDerivativesBB[k] = gofrPrimeBB[k][j]*logGofrBB[k]*x*x; }
+  double pairAAvalue =  prefactorAA*integrate(integrandAA,deltar);
+  double pairABvalue = prefactorAB*integrate(integrandAB,deltar);
+  double pairBBvalue = prefactorBB*integrate(integrandBB,deltar);
+  // Output individual pairs or only full pair entropy
+  if (do_pairs) {
+    Value* pairAA=getPntrToComponent("pairAA");
+    Value* pairAB=getPntrToComponent("pairAB");
+    Value* pairBB=getPntrToComponent("pairBB");
+    Value* full=getPntrToComponent("full");
+    pairAA->set(pairAAvalue);
+    pairAB->set(pairABvalue);
+    pairBB->set(pairBBvalue);
+    full->set(pairAAvalue+pairABvalue+pairBBvalue);
+  } else {
+    setValue           (pairAAvalue+pairABvalue+pairBBvalue);
+  } 
+  if (!doNotCalculateDerivatives() ) {
+    // Construct integrand and integrate derivatives
+    for(unsigned int j=rank;j<getNumberOfAtoms();j+=stride) {
+    //for(unsigned j=0;j<getNumberOfAtoms();++j) {
+      vector<Vector> integrandDerivativesAA(nhist);
+      vector<Vector> integrandDerivativesAB(nhist);
+      vector<Vector> integrandDerivativesBB(nhist);
+      for(unsigned k=0;k<nhist;++k){
+        double x=deltar*(k+0.5);
+        if (gofrAA[k]>1.e-10) { integrandDerivativesAA[k] = gofrPrimeAA[k][j]*logGofrAA[k]*x*x; }
+        if (gofrAB[k]>1.e-10) { integrandDerivativesAB[k] = gofrPrimeAB[k][j]*logGofrAB[k]*x*x; }
+        if (gofrBB[k]>1.e-10) { integrandDerivativesBB[k] = gofrPrimeBB[k][j]*logGofrBB[k]*x*x; }
+      }
+      derivAA[j] =  prefactorAA*integrate(integrandDerivativesAA,deltar);
+      derivAB[j] =  prefactorAB*integrate(integrandDerivativesAB,deltar);
+      derivBB[j] =  prefactorBB*integrate(integrandDerivativesBB,deltar);
     }
-    // Integrate
-    deriv[j] =  prefactorAA*integrate(integrandDerivativesAA,deltar);
-    deriv[j] += prefactorAB*integrate(integrandDerivativesAB,deltar);
-    deriv[j] += prefactorBB*integrate(integrandDerivativesBB,deltar);
+    comm.Sum(&derivAA[0][0],3*getNumberOfAtoms());
+    comm.Sum(&derivAB[0][0],3*getNumberOfAtoms());
+    comm.Sum(&derivBB[0][0],3*getNumberOfAtoms());
+    if (do_pairs) {
+      Value* pairAA=getPntrToComponent("pairAA");
+      Value* pairAB=getPntrToComponent("pairAB");
+      Value* pairBB=getPntrToComponent("pairBB");
+      Value* full=getPntrToComponent("full");
+      for(unsigned j=0;j<getNumberOfAtoms();++j) setAtomsDerivatives (pairAA,j,derivAA[j]);
+      for(unsigned j=0;j<getNumberOfAtoms();++j) setAtomsDerivatives (pairAB,j,derivAB[j]);
+      for(unsigned j=0;j<getNumberOfAtoms();++j) setAtomsDerivatives (pairBB,j,derivBB[j]);
+      for(unsigned j=0;j<getNumberOfAtoms();++j) setAtomsDerivatives (full,j,derivAA[j]+derivAB[j]+derivBB[j]);
+    } else {
+      for(unsigned j=0;j<getNumberOfAtoms();++j) setAtomsDerivatives (j,derivAA[j]+derivAB[j]+derivBB[j]);
+    }
+    // Virial of positions
+    // Construct virial integrand
+    vector<Tensor> integrandVirialAA(nhist);
+    vector<Tensor> integrandVirialAB(nhist);
+    vector<Tensor> integrandVirialBB(nhist);
+    for(unsigned j=0;j<nhist;++j){
+      double x=deltar*(j+0.5);
+      if (gofrAA[j]>1.e-10) { integrandVirialAA[j] = gofrVirialAA[j]*logGofrAA[j]*x*x ;}
+      if (gofrAB[j]>1.e-10) { integrandVirialAB[j] = gofrVirialAB[j]*logGofrAB[j]*x*x ;}
+      if (gofrBB[j]>1.e-10) { integrandVirialBB[j] = gofrVirialBB[j]*logGofrBB[j]*x*x ;}
+    }
+    // Integrate virial
+    Tensor virialAA = prefactorAA*integrate(integrandVirialAA,deltar);
+    Tensor virialAB = prefactorAB*integrate(integrandVirialAB,deltar);
+    Tensor virialBB = prefactorBB*integrate(integrandVirialBB,deltar);
+    // Virial of volume
+    // Construct virial integrand
+    vector<double> integrandVirialVolumeAA(nhist);
+    vector<double> integrandVirialVolumeAB(nhist);
+    vector<double> integrandVirialVolumeBB(nhist);
+    for(unsigned j=0;j<nhist;j+=1) {
+      double x=deltar*(j+0.5);
+      integrandVirialVolumeAA[j] = (-gofrAA[j]+1)*x*x;
+      integrandVirialVolumeAB[j] = (-gofrAB[j]+1)*x*x;
+      integrandVirialVolumeBB[j] = (-gofrBB[j]+1)*x*x;
+    }
+    // Integrate virial
+    virialAA += prefactorAA*integrate(integrandVirialVolumeAA,deltar)*Tensor::identity();
+    virialAB += prefactorAB*integrate(integrandVirialVolumeAB,deltar)*Tensor::identity();
+    virialBB += prefactorBB*integrate(integrandVirialVolumeBB,deltar)*Tensor::identity();
+    // Set virial
+    if (do_pairs) {
+      Value* pairAA=getPntrToComponent("pairAA");
+      Value* pairAB=getPntrToComponent("pairAB");
+      Value* pairBB=getPntrToComponent("pairBB");
+      Value* full=getPntrToComponent("full");
+      setBoxDerivatives  (pairAA,virialAA);
+      setBoxDerivatives  (pairAB,virialAB);
+      setBoxDerivatives  (pairBB,virialBB);
+      setBoxDerivatives  (full,virialAA+virialAB+virialBB);
+    } else {
+      setBoxDerivatives  (virialAA+virialAB+virialBB);
+    }
   }
-  // Virial of positions
-  // Construct virial integrand
-  vector<Tensor> integrandVirialAA(nhist);
-  vector<Tensor> integrandVirialAB(nhist);
-  vector<Tensor> integrandVirialBB(nhist);
-  for(unsigned j=0;j<nhist;++j){
-    double x=deltar*(j+0.5);
-    if (gofrAA[j]>1.e-10) { integrandVirialAA[j] = gofrVirialAA[j]*logGofrAA[j]*x*x ;}
-    if (gofrAB[j]>1.e-10) { integrandVirialAB[j] = gofrVirialAB[j]*logGofrAB[j]*x*x ;}
-    if (gofrBB[j]>1.e-10) { integrandVirialBB[j] = gofrVirialBB[j]*logGofrBB[j]*x*x ;}
-  }
-  // Integrate virial
-  virial =  prefactorAA*integrate(integrandVirialAA,deltar);
-  virial += prefactorAB*integrate(integrandVirialAB,deltar);
-  virial += prefactorBB*integrate(integrandVirialBB,deltar);
-  // Virial of volume
-  // Construct virial integrand
-  vector<double> integrandVirialVolumeAA(nhist);
-  vector<double> integrandVirialVolumeAB(nhist);
-  vector<double> integrandVirialVolumeBB(nhist);
-  for(unsigned j=0;j<nhist;j+=1) {
-    double x=deltar*(j+0.5);
-    integrandVirialVolumeAA[j] = (-gofrAA[j]+1)*x*x;
-    integrandVirialVolumeAB[j] = (-gofrAB[j]+1)*x*x;
-    integrandVirialVolumeBB[j] = (-gofrBB[j]+1)*x*x;
-  }
-  // Integrate virial
-  virial += prefactorAA*integrate(integrandVirialVolumeAA,deltar)*Tensor::identity();
-  virial += prefactorAB*integrate(integrandVirialVolumeAB,deltar)*Tensor::identity();
-  virial += prefactorBB*integrate(integrandVirialVolumeBB,deltar)*Tensor::identity();
-  // Assign output quantities
-  for(unsigned i=0;i<deriv.size();++i) setAtomsDerivatives(i,deriv[i]);
-  setValue           (pairEntropy);
-  setBoxDerivatives  (virial);
 }
 
 double PairEntropyMulticomp::kernel(double distance,double&der)const{
