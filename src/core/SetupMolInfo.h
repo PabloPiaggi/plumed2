@@ -1,5 +1,5 @@
 /* +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-   Copyright (c) 2012-2016 The plumed team
+   Copyright (c) 2012-2017 The plumed team
    (see the PEOPLE file at the root of the distribution for a list of names)
 
    See http://www.plumed.org for more information.
@@ -30,9 +30,9 @@ namespace PLMD {
 
 class PDB;
 
-class SetupMolInfo : 
-public ActionSetup,  
-public ActionAtomistic {
+class SetupMolInfo :
+  public ActionSetup,
+  public ActionAtomistic {
 private:
 /// A pdb file containing the topology
   PDB& pdb;

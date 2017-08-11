@@ -630,6 +630,7 @@ make_pdfdoc
 dot
 doxygen
 make_doc
+readelf
 LD
 OPENMP_CXXFLAGS
 EGREP
@@ -694,6 +695,8 @@ ac_subst_files=''
 ac_user_opts='
 enable_option_checking
 enable_modules
+enable_libsearch
+enable_static_patch
 enable_doc
 enable_pdfdoc
 enable_debug
@@ -703,6 +706,7 @@ enable_fussy
 enable_debug_glibcxx
 enable_shared
 enable_dependency_tracking
+enable_rpath
 enable_cxx_exceptions
 enable_ld_r
 enable_mpi
@@ -1355,6 +1359,8 @@ Optional Features:
   --enable-FEATURE[=ARG]  include FEATURE [ARG=yes]
   --enable-modules        all/none/reset or : separated list such as
                           +crystallization:-bias default: reset
+  --enable-libsearch      enable search for libraries, default: yes
+  --enable-static-patch   enable allow statically linking plumed, default: yes
   --enable-doc            enable documentation, default: yes
   --enable-pdfdoc         enable pdf version of the manual, default: no
   --enable-debug          enable debugging, default: no
@@ -1365,7 +1371,8 @@ Optional Features:
   --enable-shared         enable shared libs, default: yes
   --enable-dependency-tracking
                           enable dependency tracking, default: yes
-  --enable-cxx-exceptions enable c++ exceptions, default: no
+  --enable-rpath          enable store rpath, default: no
+  --enable-cxx-exceptions enable c++ exceptions, default: yes
   --enable-ld-r           enable group object files, default: yes
   --enable-mpi            enable search for mpi, default: yes
   --enable-external-lapack
@@ -2406,6 +2413,51 @@ fi
 
 # set enable flags for ./configure
 
+# This can be disabled when configuring within a package manager
+# such as macports to make sure that only libraries explicitly
+# listed in LDFLAGS are linked
+
+libsearch=
+# Check whether --enable-libsearch was given.
+if test "${enable_libsearch+set}" = set; then :
+  enableval=$enable_libsearch; case "${enableval}" in
+             (yes) libsearch=true ;;
+             (no)  libsearch=false ;;
+             (*)   as_fn_error $? "wrong argument to --enable-libsearch" "$LINENO" 5 ;;
+  esac
+else
+  case "yes" in
+             (yes) libsearch=true ;;
+             (no)  libsearch=false ;;
+  esac
+
+fi
+
+
+
+# This can be disabled to avoid the extra tests for static patching.
+# In the future, when this is disabled, we could disable the "--static" flag
+# of "plumed patch"
+
+static_patch=
+# Check whether --enable-static-patch was given.
+if test "${enable_static_patch+set}" = set; then :
+  enableval=$enable_static_patch; case "${enableval}" in
+             (yes) static_patch=true ;;
+             (no)  static_patch=false ;;
+             (*)   as_fn_error $? "wrong argument to --enable-static-patch" "$LINENO" 5 ;;
+  esac
+else
+  case "yes" in
+             (yes) static_patch=true ;;
+             (no)  static_patch=false ;;
+  esac
+
+fi
+
+
+
+
 doc=
 # Check whether --enable-doc was given.
 if test "${enable_doc+set}" = set; then :
@@ -2568,6 +2620,24 @@ fi
 
 
 
+rpath=
+# Check whether --enable-rpath was given.
+if test "${enable_rpath+set}" = set; then :
+  enableval=$enable_rpath; case "${enableval}" in
+             (yes) rpath=true ;;
+             (no)  rpath=false ;;
+             (*)   as_fn_error $? "wrong argument to --enable-rpath" "$LINENO" 5 ;;
+  esac
+else
+  case "no" in
+             (yes) rpath=true ;;
+             (no)  rpath=false ;;
+  esac
+
+fi
+
+
+
 cxx_exceptions=
 # Check whether --enable-cxx-exceptions was given.
 if test "${enable_cxx_exceptions+set}" = set; then :
@@ -2577,7 +2647,7 @@ if test "${enable_cxx_exceptions+set}" = set; then :
              (*)   as_fn_error $? "wrong argument to --enable-cxx-exceptions" "$LINENO" 5 ;;
   esac
 else
-  case "no" in
+  case "yes" in
              (yes) cxx_exceptions=true ;;
              (no)  cxx_exceptions=false ;;
   esac
@@ -5534,7 +5604,8 @@ if test "x$ac_cv_func_dgemv_" = xyes; then :
   blas_found=underscore
 else
 
-{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for dgemv in -lblas" >&5
+if test "${libsearch}" == true ; then
+  { $as_echo "$as_me:${as_lineno-$LINENO}: checking for dgemv in -lblas" >&5
 $as_echo_n "checking for dgemv in -lblas... " >&6; }
 if ${ac_cv_lib_blas_dgemv+:} false; then :
   $as_echo_n "(cached) " >&6
@@ -5574,7 +5645,7 @@ if test "x$ac_cv_lib_blas_dgemv" = xyes; then :
   LIBS="-lblas $LIBS" blas_found=nounderscore
 else
 
-{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for dgemv_ in -lblas" >&5
+  { $as_echo "$as_me:${as_lineno-$LINENO}: checking for dgemv_ in -lblas" >&5
 $as_echo_n "checking for dgemv_ in -lblas... " >&6; }
 if ${ac_cv_lib_blas_dgemv_+:} false; then :
   $as_echo_n "(cached) " >&6
@@ -5623,6 +5694,8 @@ fi
 
 fi
 
+fi
+
 # if not found, then use internal lapack and blas
 if test -z "$blas_found" ; then
 { $as_echo "$as_me:${as_lineno-$LINENO}: WARNING: using internal lapack and blas, could be inefficient" >&5
@@ -5651,7 +5724,8 @@ if eval test \"x\$"$as_ac_var"\" = x"yes"; then :
   lapack_found=$blas_found
 else
 
-as_ac_Lib=`$as_echo "ac_cv_lib_lapack_$search_for" | $as_tr_sh`
+if test "${libsearch}" == true ; then
+  as_ac_Lib=`$as_echo "ac_cv_lib_lapack_$search_for" | $as_tr_sh`
 { $as_echo "$as_me:${as_lineno-$LINENO}: checking for $search_for in -llapack" >&5
 $as_echo_n "checking for $search_for in -llapack... " >&6; }
 if eval \${$as_ac_Lib+:} false; then :
@@ -5691,9 +5765,9 @@ eval ac_res=\$$as_ac_Lib
 $as_echo "$ac_res" >&6; }
 if eval test \"x\$"$as_ac_Lib"\" = x"yes"; then :
   LIBS="-llapack $LIBS" lapack_found=yes
-
 fi
 
+fi
 
 fi
 
@@ -5718,6 +5792,127 @@ fi
 if test "$blas_found" == nounderscore
 then
   $as_echo "#define F77_NO_UNDERSCORE 1" >>confdefs.h
+
+fi
+
+if test -n "$blas_found" ; then
+
+
+
+
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking whether sdot returns float" >&5
+$as_echo_n "checking whether sdot returns float... " >&6; }
+if test "$cross_compiling" = yes; then :
+   { $as_echo "$as_me:${as_lineno-$LINENO}: result: not checked (cross compiling)" >&5
+$as_echo "not checked (cross compiling)" >&6; }
+
+else
+  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+#if ! defined(F77_NO_UNDERSCORE)
+#define sdot sdot_
+#endif
+extern "C"{
+float sdot(int *n, float *dx, int *incx, float *dy, int *incy);
+}
+
+int main(){
+  int size=5;
+// notice that [] is required to cheat autoconf
+  float af[5],bf[5];
+  for(unsigned i=0;i<size;i++){
+    af[i]=size;
+    bf[i]=size-i;
+  }
+  int inca=1;
+  int incb=1;
+  float f=sdot(&size,af,&inca,bf,&incb)-75;
+  if(f*f<1e-10) return 0;
+  else return 1;
+}
+
+_ACEOF
+if ac_fn_cxx_try_run "$LINENO"; then :
+   sdot_returns_float=yes ; { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+$as_echo "yes" >&6; }
+else
+   sdot_returns_float=no ;  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+fi
+rm -f core *.core core.conftest.* gmon.out bb.out conftest$ac_exeext \
+  conftest.$ac_objext conftest.beam conftest.$ac_ext
+fi
+
+
+if test "$sdot_returns_float" == no ;
+then
+
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking whether sdot returns double" >&5
+$as_echo_n "checking whether sdot returns double... " >&6; }
+if test "$cross_compiling" = yes; then :
+   { $as_echo "$as_me:${as_lineno-$LINENO}: result: not checked (cross compiling)" >&5
+$as_echo "not checked (cross compiling)" >&6; }
+
+else
+  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+#if ! defined(F77_NO_UNDERSCORE)
+#define sdot sdot_
+#endif
+extern "C"{
+double sdot(int *n, float *dx, int *incx, float *dy, int *incy);
+}
+
+int main(){
+  int size=5;
+// notice that [] is required to cheat autoconf
+  float af[5],bf[5];
+  for(unsigned i=0;i<size;i++){
+    af[i]=size;
+    bf[i]=size-i;
+  }
+  int inca=1;
+  int incb=1;
+  double f=sdot(&size,af,&inca,bf,&incb)-75;
+  if(f*f<1e-10) return 0;
+  else return 1;
+}
+
+_ACEOF
+if ac_fn_cxx_try_run "$LINENO"; then :
+   sdot_returns_double=yes ; { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+$as_echo "yes" >&6; }
+else
+   sdot_returns_double=no ;  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+fi
+rm -f core *.core core.conftest.* gmon.out bb.out conftest$ac_exeext \
+  conftest.$ac_objext conftest.beam conftest.$ac_ext
+fi
+
+
+fi
+
+if test "$sdot_returns_double" = yes ; then
+  { $as_echo "$as_me:${as_lineno-$LINENO}: Setting workaround for blas float functions returning double" >&5
+$as_echo "$as_me: Setting workaround for blas float functions returning double" >&6;}
+  $as_echo "#define __PLUMED_BLAS_RETURNS_FLOAT double" >>confdefs.h
+
+  if test -n "$lapack_found" ; then
+    { $as_echo "$as_me:${as_lineno-$LINENO}: Setting workaround for lapack float functions returning double" >&5
+$as_echo "$as_me: Setting workaround for lapack float functions returning double" >&6;}
+    $as_echo "#define __PLUMED_LAPACK_RETURNS_FLOAT double" >>confdefs.h
+
+  fi
+else if test "$sdot_returns_float" = no && test "$sdot_returns_double" = no ;
+then
+  { $as_echo "$as_me:${as_lineno-$LINENO}: WARNING: There is a problem with your blas implementation" >&5
+$as_echo "$as_me: WARNING: There is a problem with your blas implementation" >&2;}
+fi
+
+fi
 
 fi
 
@@ -5783,11 +5978,14 @@ fi
 { $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_molfile_plugin_molfile_dcdplugin_init" >&5
 $as_echo "$ac_cv_lib_molfile_plugin_molfile_dcdplugin_init" >&6; }
 if test "x$ac_cv_lib_molfile_plugin_molfile_dcdplugin_init" = xyes; then :
-   ac_fn_cxx_check_header_mongrel "$LINENO" "libmolfile_plugin.h" "ac_cv_header_libmolfile_plugin_h" "$ac_includes_default"
+  if test "${libsearch}" == true ; then
+        	 ac_fn_cxx_check_header_mongrel "$LINENO" "libmolfile_plugin.h" "ac_cv_header_libmolfile_plugin_h" "$ac_includes_default"
 if test "x$ac_cv_header_libmolfile_plugin_h" = xyes; then :
   LIBS="-lmolfile_plugin $LIBS" found=ok
 fi
 
+
+           fi
 
 fi
 
@@ -5959,7 +6157,9 @@ if test "x$ac_cv_header_matheval_h" = xyes; then :
 if test "x$ac_cv_func_evaluator_create" = xyes; then :
   found=ok
 else
-  { $as_echo "$as_me:${as_lineno-$LINENO}: checking for evaluator_create in -lmatheval" >&5
+
+          if test "${libsearch}" == true ; then
+           { $as_echo "$as_me:${as_lineno-$LINENO}: checking for evaluator_create in -lmatheval" >&5
 $as_echo_n "checking for evaluator_create in -lmatheval... " >&6; }
 if ${ac_cv_lib_matheval_evaluator_create+:} false; then :
   $as_echo_n "(cached) " >&6
@@ -5998,6 +6198,8 @@ $as_echo "$ac_cv_lib_matheval_evaluator_create" >&6; }
 if test "x$ac_cv_lib_matheval_evaluator_create" = xyes; then :
   LIBS="-lmatheval $LIBS" && found=ok
 fi
+
+          fi
 
 
 fi
@@ -6121,7 +6323,9 @@ if test "x$ac_cv_header_zlib_h" = xyes; then :
 if test "x$ac_cv_func_gzopen" = xyes; then :
   found=ok
 else
-  { $as_echo "$as_me:${as_lineno-$LINENO}: checking for gzopen in -lz" >&5
+
+          if test "${libsearch}" == true ; then
+           { $as_echo "$as_me:${as_lineno-$LINENO}: checking for gzopen in -lz" >&5
 $as_echo_n "checking for gzopen in -lz... " >&6; }
 if ${ac_cv_lib_z_gzopen+:} false; then :
   $as_echo_n "(cached) " >&6
@@ -6161,6 +6365,8 @@ if test "x$ac_cv_lib_z_gzopen" = xyes; then :
   LIBS="-lz $LIBS" && found=ok
 fi
 
+          fi
+
 
 fi
 
@@ -6187,7 +6393,8 @@ if test "x$ac_cv_func_cblas_dgemv" = xyes; then :
   found=ok
 else
 
-  { $as_echo "$as_me:${as_lineno-$LINENO}: checking for cblas_dgemv in -lgslcblas" >&5
+  if test "${libsearch}" == true ; then
+    { $as_echo "$as_me:${as_lineno-$LINENO}: checking for cblas_dgemv in -lgslcblas" >&5
 $as_echo_n "checking for cblas_dgemv in -lgslcblas... " >&6; }
 if ${ac_cv_lib_gslcblas_cblas_dgemv+:} false; then :
   $as_echo_n "(cached) " >&6
@@ -6225,8 +6432,9 @@ fi
 $as_echo "$ac_cv_lib_gslcblas_cblas_dgemv" >&6; }
 if test "x$ac_cv_lib_gslcblas_cblas_dgemv" = xyes; then :
   LIBS="-lgslcblas $LIBS" found=ok
-
 fi
+
+  fi
 
 fi
 
@@ -6240,7 +6448,8 @@ if test "x$ac_cv_func_gsl_vector_alloc" = xyes; then :
   found=ok
 else
 
-      { $as_echo "$as_me:${as_lineno-$LINENO}: checking for gsl_vector_alloc in -lgsl" >&5
+      if test "${libsearch}" == true ; then
+        { $as_echo "$as_me:${as_lineno-$LINENO}: checking for gsl_vector_alloc in -lgsl" >&5
 $as_echo_n "checking for gsl_vector_alloc in -lgsl... " >&6; }
 if ${ac_cv_lib_gsl_gsl_vector_alloc+:} false; then :
   $as_echo_n "(cached) " >&6
@@ -6278,8 +6487,9 @@ fi
 $as_echo "$ac_cv_lib_gsl_gsl_vector_alloc" >&6; }
 if test "x$ac_cv_lib_gsl_gsl_vector_alloc" = xyes; then :
   LIBS="-lgsl $LIBS" found=ok
-
 fi
+
+      fi
 
 fi
 
@@ -6308,7 +6518,9 @@ if test "x$ac_cv_header_xdrfile_xdrfile_xtc_h" = xyes; then :
 if test "x$ac_cv_func_write_xtc" = xyes; then :
   found=ok
 else
-  { $as_echo "$as_me:${as_lineno-$LINENO}: checking for write_xtc in -lxdrfile" >&5
+
+          if test "${libsearch}" == true ; then
+           { $as_echo "$as_me:${as_lineno-$LINENO}: checking for write_xtc in -lxdrfile" >&5
 $as_echo_n "checking for write_xtc in -lxdrfile... " >&6; }
 if ${ac_cv_lib_xdrfile_write_xtc+:} false; then :
   $as_echo_n "(cached) " >&6
@@ -6348,6 +6560,8 @@ if test "x$ac_cv_lib_xdrfile_write_xtc" = xyes; then :
   LIBS="-lxdrfile $LIBS" && found=ok
 fi
 
+          fi
+
 
 fi
 
@@ -6374,7 +6588,9 @@ if test "x$ac_cv_header_boost_graph_graph_utility_hpp" = xyes; then :
 if test "x$ac_cv_func_exit" = xyes; then :
   found=ok
 else
-  { $as_echo "$as_me:${as_lineno-$LINENO}: checking for exit in -lboost_graph" >&5
+
+          if test "${libsearch}" == true ; then
+           { $as_echo "$as_me:${as_lineno-$LINENO}: checking for exit in -lboost_graph" >&5
 $as_echo_n "checking for exit in -lboost_graph... " >&6; }
 if ${ac_cv_lib_boost_graph_exit+:} false; then :
   $as_echo_n "(cached) " >&6
@@ -6414,6 +6630,8 @@ if test "x$ac_cv_lib_boost_graph_exit" = xyes; then :
   LIBS="-lboost_graph $LIBS" && found=ok
 fi
 
+          fi
+
 
 fi
 
@@ -6440,7 +6658,9 @@ if test "x$ac_cv_header_fftw3_h" = xyes; then :
 if test "x$ac_cv_func_fftw_execute" = xyes; then :
   found=ok
 else
-  { $as_echo "$as_me:${as_lineno-$LINENO}: checking for fftw_execute in -lfftw3" >&5
+
+          if test "${libsearch}" == true ; then
+           { $as_echo "$as_me:${as_lineno-$LINENO}: checking for fftw_execute in -lfftw3" >&5
 $as_echo_n "checking for fftw_execute in -lfftw3... " >&6; }
 if ${ac_cv_lib_fftw3_fftw_execute+:} false; then :
   $as_echo_n "(cached) " >&6
@@ -6479,6 +6699,8 @@ $as_echo "$ac_cv_lib_fftw3_fftw_execute" >&6; }
 if test "x$ac_cv_lib_fftw3_fftw_execute" = xyes; then :
   LIBS="-lfftw3 $LIBS" && found=ok
 fi
+
+          fi
 
 
 fi
@@ -6542,7 +6764,12 @@ $as_echo "$as_me: Dynamic library extension is 'dylib'" >&6;}
     { $as_echo "$as_me:${as_lineno-$LINENO}: LDSO needs special flags" >&5
 $as_echo "$as_me: LDSO needs special flags" >&6;}
     SOEXT=dylib
-    LDSO="$LDSO -undefined suppress -flat_namespace -dynamiclib"
+    LDSO="$LDSO -undefined suppress -flat_namespace -dynamiclib -Wl,-headerpad_max_install_names"
+    if test "$rpath" = true ; then
+      { $as_echo "$as_me:${as_lineno-$LINENO}: Switching off rpath on OSX" >&5
+$as_echo "$as_me: Switching off rpath on OSX" >&6;}
+      rpath=false
+    fi
   ;;
   (Linux)
     { $as_echo "$as_me:${as_lineno-$LINENO}: *** Special settings for dynamic libraries on Linux ***" >&5
@@ -6609,6 +6836,60 @@ $as_echo "no" >&6; }
     { $as_echo "$as_me:${as_lineno-$LINENO}: WARNING: dynamic library will be disabled" >&5
 $as_echo "$as_me: WARNING: dynamic library will be disabled" >&2;}
     SOEXT=
+  fi
+  if test -n "$SOEXT" && test "$rpath" = true ; then
+    rm -f conftest.$SOEXT
+    readelf=""
+    # Extract the first word of "readelf", so it can be a program name with args.
+set dummy readelf; ac_word=$2
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for $ac_word" >&5
+$as_echo_n "checking for $ac_word... " >&6; }
+if ${ac_cv_prog_readelf+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  if test -n "$readelf"; then
+  ac_cv_prog_readelf="$readelf" # Let the user override the test.
+else
+as_save_IFS=$IFS; IFS=$PATH_SEPARATOR
+for as_dir in $PATH
+do
+  IFS=$as_save_IFS
+  test -z "$as_dir" && as_dir=.
+    for ac_exec_ext in '' $ac_executable_extensions; do
+  if as_fn_executable_p "$as_dir/$ac_word$ac_exec_ext"; then
+    ac_cv_prog_readelf="found"
+    $as_echo "$as_me:${as_lineno-$LINENO}: found $as_dir/$ac_word$ac_exec_ext" >&5
+    break 2
+  fi
+done
+  done
+IFS=$as_save_IFS
+
+fi
+fi
+readelf=$ac_cv_prog_readelf
+if test -n "$readelf"; then
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: $readelf" >&5
+$as_echo "$readelf" >&6; }
+else
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+fi
+
+
+    if test "$readelf" == found ; then
+      test_LDSO="$LDSO -Wl,-R -Wl,/some/random/dir/"
+      $test_LDSO $LDFLAGS conftest.o -o conftest.$SOEXT 1>/dev/null 2>/dev/null
+      if readelf -d conftest.$SOEXT | grep RPATH | grep -q /some/random/dir ; then
+        LDSO="$LDSO -Wl,-R -Wl,\"$LIBRARY_PATH\""
+      else
+        { $as_echo "$as_me:${as_lineno-$LINENO}: WARNING: -R option seems not working, disabling rpath" >&5
+$as_echo "$as_me: WARNING: -R option seems not working, disabling rpath" >&2;}
+      fi
+    else
+      { $as_echo "$as_me:${as_lineno-$LINENO}: WARNING: readelf not available, no way to set rpath" >&5
+$as_echo "$as_me: WARNING: readelf not available, no way to set rpath" >&2;}
+    fi
   fi
   rm -f conftest.*
 fi
@@ -6909,6 +7190,8 @@ $as_echo "no" >&6; }
   fi
 fi
 
+if test "${static_patch}" == true ; then
+
 { $as_echo "$as_me:${as_lineno-$LINENO}: I will now check if C++ objects can be linked by C/Fortran compilers" >&5
 $as_echo "$as_me: I will now check if C++ objects can be linked by C/Fortran compilers" >&6;}
 { $as_echo "$as_me:${as_lineno-$LINENO}: This is relevant if you want to use plumed patch --static on a non-C++ code" >&5
@@ -6948,7 +7231,12 @@ EOF
     $CXX $CXXFLAGS -c conftest.cpp
 # start search:
     found=
-    for testlib in "" -lstdc++ -lc++ -lmpi_cxx ; do
+    if test "${libsearch}" == true ; then
+      testlibs="-lstdc++ -lc++ -lmpi_cxx"
+    else
+      testlibs=""
+    fi
+    for testlib in "" $testlibs ; do
       comment=
       test -n "$testlib" && comment=" with library $testlib"
       { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether $name can link a C++ object$comment" >&5
@@ -6978,6 +7266,11 @@ $as_echo "$as_me: $compiler compiler not configured" >&6;}
   fi
   rm -f conftest.* conftest-main.*
 done
+
+else
+{ $as_echo "$as_me:${as_lineno-$LINENO}: Static patching is disabled, thus tests required for static patching will be skipped" >&5
+$as_echo "$as_me: Static patching is disabled, thus tests required for static patching will be skipped" >&6;}
+fi
 
 if test "$prefix" == NONE
 then

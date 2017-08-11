@@ -3,6 +3,7 @@
 /*.tmp
 /automatic
 /*PP.txt
-/links-to-user-manual.txt
+/links-to-user-manual.md
+/plumedcheck.md
 /coverage
 

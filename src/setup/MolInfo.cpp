@@ -22,8 +22,8 @@
 #include "core/ActionRegister.h"
 #include "core/SetupMolInfo.h"
 
-namespace PLMD{
-namespace setup{
+namespace PLMD {
+namespace setup {
 
 //+PLUMEDOC TOPOLOGY MOLINFO
 /*
@@ -34,22 +34,25 @@ or as a set of lists of atoms that describe the various chains in your system. I
 is used plumed the MOLINFO command will endeavor to recognize the various chains and residues that
 make up the molecules in your system using the chainIDs and resnumbers from the pdb file. You can
 then use this information in later commands to specify atom lists in terms residues.  For example
-using this command you can find the backbone atoms in your structure automatically. 
+using this command you can find the backbone atoms in your structure automatically.
 
 \warning
-Please be aware that the pdb parser in plumed is far from perfect. You should thus check the log file
+Please be aware that the PDB parser in plumed is far from perfect. You should thus check the log file
 and examine what plumed is actually doing whenenver you use the MOLINFO action.
 Also make sure that the atoms are listed in the pdb with the correct order.
 If you are using gromacs, the safest way is to use reference pdb file
 generated with `gmx editconf -f topol.tpr -o reference.pdb`.
 
+More information of the PDB parser implemented in PLUMED can be found \ref pdbreader "at this page".
 
-Using MOLINFO with a protein's pdb extend the possibility of atoms selection using the @ special
+
+Using MOLINFO with a protein's or nucleic acid's pdb extends the possibility of atoms selection using the @ special
 symbol.
 
 Providing `MOLTYPE=protein`, `MOLTYPE=rna`, or `MOLTYPE=dna` will instruct plumed to look
-for known residues from these three types of molecule (so that any of these three choice
-can be safely used in a RNA/protein complex).
+for known residues from these three types of molecule. In other words, this is available for
+historical reasons and to allow future extensions where alternative lists will be provided.
+As of now, you can just ignore this keyoword.
 
 For protein residues, the following groups are available:
 
@@ -80,10 +83,19 @@ For DNA or RNA residues, the following groups are available:
 @v3-#
 @v4-#
 
+# quadruplet corresponding to the chi torsional angle
+@chi-#
+
 # backbone, sugar, and base heavy atoms
 @back-#
 @sugar-#
 @base-#
+
+# ordered triplets of atoms on the 6-membered ring of nucleobases
+# namely:
+#  C2/C4/C6 for pyrimidines
+#  C2/C6/C4 for purines
+@lcs-#
 \endverbatim
 
 Notice that `zeta` and `epsilon` groups should not be used on 3' end residue and `alpha` and `beta`
@@ -96,10 +108,10 @@ with the same name. This means that it is also possible to pick single atoms usi
 \warning If a residue-chain is repeated twice in the reference pdb only the first entry will be selected.
 
 \bug At the moment the HA1 atoms in a GLY residues are treated as if they are the CB atoms. This may or
-may not be true - GLY is problematic for secondary structure residues as it is achiral. 
+may not be true - GLY is problematic for secondary structure residues as it is achiral.
 
-\bug If you use WHOLEMOLECULES RESIDUES=1-10 for a 18 amino acid protein 
-( 18 amino acids + 2 terminal groups = 20 residues ) the code will fail as it will not be able to 
+\bug If you use WHOLEMOLECULES RESIDUES=1-10 for a 18 amino acid protein
+( 18 amino acids + 2 terminal groups = 20 residues ) the code will fail as it will not be able to
 interpret terminal residue 1.
 
 \par Examples
@@ -107,23 +119,21 @@ interpret terminal residue 1.
 In the following example the MOLINFO command is used to provide the information on which atoms
 are in the backbone of a protein to the ALPHARMSD CV.
 
-\verbatim
+\plumedfile
 MOLINFO STRUCTURE=reference.pdb
-ALPHARMSD RESIDUES=all TYPE=DRMSD LESS_THAN={RATIONAL R_0=0.08 NN=8 MM=12} LABEL=a 
-\endverbatim
-(see also \ref ALPHARMSD)
+ALPHARMSD RESIDUES=all TYPE=DRMSD LESS_THAN={RATIONAL R_0=0.08 NN=8 MM=12} LABEL=a
+\endplumedfile
 
 The following example prints the distance corresponding to the hydrogen bonds
 in a GC Watson-Crick pair.
 
-\verbatim
+\plumedfile
 MOLINFO STRUCTURE=reference.pdb
 hb1: DISTANCE ATOMS=@N2-1,@O2-14
 hb2: DISTANCE ATOMS=@N1-1,@N3-14
 hb3: DISTANCE ATOMS=@O6-1,@N4-14
 PRINT ARG=hb1,hb2,hb3
-\endverbatim
-(see also \ref DISTANCE).
+\endplumedfile
 
 
 */

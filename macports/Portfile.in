@@ -11,8 +11,12 @@ PortGroup           cxx11 1.1
 version             @_VERSION_@
 revision            @_REVISION_@
 categories          science
-license             LGPL-3
-maintainers         gmail.com:giovanni.bussi
+
+# Most of the PLUMED code is L-GPL3. However, PLUMED containts
+# molfile plugins from VMD that are released with a BSD-like license
+# http://www.ks.uiuc.edu/Research/vmd/plugins/molfile/
+license             LGPL-3 BSD
+maintainers         {gmail.com:giovanni.bussi @GiovanniBussi} openmaintainer
 description         PLUMED is a plugin for molecular dynamics
 long_description    PLUMED is a plugin for molecular dynamics that can be used \
                     in combination with popular molecular dynamics codes to perform biased simulations. \
@@ -24,24 +28,29 @@ homepage            http://www.plumed.org/
 
 @_FETCH_@
 
-# This is required so that patch made with "git format-patch" work correctly
+### This is required so that patch made with "git format-patch" work correctly
 # patch.pre_args -p1
-# In case patches from github should be included to fix behavior on macports one should
-# - put patch files (as obtained with git format-patch) in files/ directory
-# - list their name here:
+### In case patches from github should be included to fix behavior on macports one should
+### - put patch files (as obtained with git format-patch) in files/ directory
+### - list their name here:
+# patchfiles file1 \
+#            file2
+### etc
 
 # Disable additional features.
-# they are then re-enabled when selecting proper variants
-# this is important for features that require an additional package to be
-# sure that even if the user has that package already installed plumed is
-# not going to use it.
+# --disable-doc:          Do not create documentation, and avoid searching for Doxygen.
+# --disable-libsearch:    Avoid searching libraries using their default names.
+#                         This forces the libraries names to be explicitly passed (e.g. "-lz").
+#                         It has the advantage that during compilation from source it does not
+#                         link packages that are not explicitely required.
+# --disable-static-patch: Avoid a number of tests that are only required when linking plumed
+#                         statically to an MD code.
+# --disable-mpi:          Do not search for MPI compiler (replaced when enabling mpi, see below)
 configure.args-append \
-               --disable-matheval \
-               --disable-xdrfile \
-               --disable-molfile-plugins \
-               --disable-zlib \
-               --disable-mpi \
-               --disable-gsl
+               --disable-doc \
+               --disable-libsearch \
+               --disable-static-patch \
+               --disable-mpi 
 
 # Hardcode path for libplumedKernel.dylib.
 # This allows to patch MD codes using the --runtime option but using as
@@ -53,66 +62,25 @@ configure.cppflags-append "-D__PLUMED_DEFAULT_KERNEL=${prefix}/lib/libplumedKern
 compilers.choose    cc cxx
 mpi.setup
 
+# To enable mpi, replace a configure flag
 if {[mpi_variant_isset]} {
   configure.args-replace --disable-mpi --enable-mpi
 }
 
-variant matheval description {Enable libmatheval} {
-  configure.args-replace --disable-matheval --enable-matheval
-# this is needed due to a problem with libmatheval:
-  depends_lib-append port:flex
-  depends_lib-append port:libmatheval
+# Libraries.
+# Library names are specified here to make sure that
+# only requested packages are linked.
+configure.ldflags-append -lmatheval -lxdrfile -lz -lgsl
+depends_lib-append port:libmatheval port:xdrfile port:zlib port:gsl
+
+# This variant enables optional modules in PLUMED.
+variant allmodules description {Enable all optional modules} {
+  configure.args-append --enable-modules=all
 }
 
-variant xdrfile description {Enable xdrfile} {
-  configure.args-replace --disable-xdrfile --enable-xdrfile
-  depends_lib-append port:xdrfile
-}
-
-variant zlib description {Enable zlib} {
-  configure.args-replace --disable-zlib --enable-zlib
-  depends_lib-append port:zlib
-}
-
-variant gsl description {Enable gsl} {
-  configure.args-replace --disable-gsl --enable-gsl
-  depends_lib-append port:gsl
-}
-
-variant molfile description {Enable molfile - includes some BSD code} {
-  license ${license} BSD
-  configure.args-replace --disable-molfile-plugins --enable-molfile-plugins
-}
-
-variant doc description {Also compile documentation} {
-  depends_build-append port:doxygen
-  depends_build-append port:graphviz
-  build.target all_plus_docs
-}
-
-# this is a tcl variable contains a concatenated list of modules
-# to be activated
-
-set plumed_modules reset
-
-# this will automatically create variants for each optional module
-@_MODULES_@ plumed_modules
-
+# Link lapack/blas libraries
 pre-configure {
   # commands should be included in a pre-configure block to access tcl variables
-  configure.args-append --enable-modules=${plumed_modules}
   configure.ldflags-append ${linalglib}
-}
-
-# Default variants include no optional modules.
-# Additionally, the link libraries that are very useful (e.g. matheval of xdrfile)
-# and quick to compile
-default_variants +matheval +xdrfile +zlib +molfile
-
-# This is required since PLUMED installation does not do it explicitly.
-# It might be removed when this will be incorporated upstream
-post-destroot {
-    system "install_name_tool -id ${prefix}/lib/libplumed.dylib ${destroot}${prefix}/lib/libplumed.dylib"
-    system "install_name_tool -id ${prefix}/lib/libplumedKernel.dylib ${destroot}${prefix}/lib/libplumedKernel.dylib"
 }
 

@@ -16,10 +16,9 @@
 !/function
 !/generic
 !/gridtools
-!/header.sh
-!/release.sh
 !/imd
 !/lapack
+!/lepton
 !/lib
 !/main
 !/maketools
@@ -27,6 +26,7 @@
 !/manyrestraints
 !/molfile
 !/multicolvar
+!/pamm
 !/reference
 !/secondarystructure
 !/setup
@@ -34,6 +34,9 @@
 !/vatom
 !/vesselbase
 !/wrapper
+!/header.sh
+!/release.sh
+!/astyle.sh
 
 
 # And just ignore these files
