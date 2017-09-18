@@ -74,6 +74,7 @@ private:
   double invSqrt2piSigma, sigmaSqr2, sigmaSqr;
   double maxr, sigma;
   unsigned nhist;
+  double density_given;
   double deltar;
   unsigned deltaBin;
   // Integration routine
@@ -99,6 +100,7 @@ void PairEntropies::registerKeywords( Keywords& keys ){
   keys.add("compulsory","MAXR","1","Maximum distance for the radial distribution function ");
   keys.add("compulsory","NHIST","300","Number of bins in the rdf ");
   keys.add("compulsory","SIGMA","0.1","Width of gaussians ");
+  keys.add("optional","DENSITY","Density to normalize the g(r). If not specified, N/V is used");
   // Use actionWithDistributionKeywords
   keys.use("MEAN"); keys.use("MORE_THAN"); keys.use("LESS_THAN"); keys.use("MAX");
   keys.use("MIN"); keys.use("BETWEEN"); keys.use("HISTOGRAM"); keys.use("MOMENTS");
@@ -111,11 +113,15 @@ Action(ao),
 MultiColvarBase(ao)
 {
   parse("MAXR",maxr);
-  log.printf("Integration in the interval from 0. to %f nm. \n", maxr );
+  log.printf("Integration in the interval from 0. to %f . \n", maxr );
   parse("NHIST",nhist);
   log.printf("The interval is partitioned in %u equal parts and the integration is perfromed with the trapezoid rule. \n", nhist );
   parse("SIGMA",sigma);
-  log.printf("The pair distribution function is calculated with a Gaussian kernel with deviation %f nm. \n", sigma);
+  log.printf("The pair distribution function is calculated with a Gaussian kernel with deviation %f . \n", sigma);
+  density_given = -1;
+  parse("DENSITY",density_given);
+  if (density_given>0) log.printf("The g(r) will be normalized with a density %f . \n", density_given);
+  else log.printf("The g(r) will be normalized with a density N/V . \n");
 
   // And setup the ActionWithVessel
   std::vector<AtomNumber> all_atoms; setupMultiColvarBase( all_atoms ); checkRead();
@@ -126,6 +132,7 @@ MultiColvarBase(ao)
   sigmaSqr2 = 2.*sigma*sigma;
   sigmaSqr = sigma*sigma;
   deltar=maxr/nhist;
+  if(deltar>sigma) error("Bin size too large! Increase NHIST");
   deltaBin = std::floor(3*sigma/deltar); //3*sigma is 99.7 %
 
   // Set the link cell cutoff
@@ -172,7 +179,9 @@ double PairEntropies::compute( const unsigned& tindex, AtomValuePack& myatoms ) 
    }
    // Normalize g(r)
    double volume=getBox().determinant(); 
-   double density=getNumberOfAtoms()/volume;
+   double density;
+   if (density_given<0) density=getNumberOfAtoms()/volume;
+   else density=density_given;
    for(unsigned i=0;i<nhist;++i){
      double x=deltar*(i+0.5);
      double normConstant = 4*pi*density*x*x;
