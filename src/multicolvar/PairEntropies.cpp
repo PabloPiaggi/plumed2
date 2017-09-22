@@ -70,11 +70,12 @@ PAIRENTROPIES ...
 
 class PairEntropies : public MultiColvarBase {
 private:
-  double rcut2;
+  double rcut2, rcut;
   double invSqrt2piSigma, sigmaSqr2, sigmaSqr;
   double maxr, sigma;
   unsigned nhist;
   double density_given;
+  bool local_density;
   double deltar;
   unsigned deltaBin;
   // Integration routine
@@ -101,6 +102,8 @@ void PairEntropies::registerKeywords( Keywords& keys ){
   keys.add("compulsory","NHIST","300","Number of bins in the rdf ");
   keys.add("compulsory","SIGMA","0.1","Width of gaussians ");
   keys.add("optional","DENSITY","Density to normalize the g(r). If not specified, N/V is used");
+  keys.addFlag("LOCAL_DENSITY",false,"Use the local density to normalize g(r). If not specified, N/V is used");
+
   // Use actionWithDistributionKeywords
   keys.use("MEAN"); keys.use("MORE_THAN"); keys.use("LESS_THAN"); keys.use("MAX");
   keys.use("MIN"); keys.use("BETWEEN"); keys.use("HISTOGRAM"); keys.use("MOMENTS");
@@ -120,7 +123,9 @@ MultiColvarBase(ao)
   log.printf("The pair distribution function is calculated with a Gaussian kernel with deviation %f . \n", sigma);
   density_given = -1;
   parse("DENSITY",density_given);
+  parseFlag("LOCAL_DENSITY",local_density);
   if (density_given>0) log.printf("The g(r) will be normalized with a density %f . \n", density_given);
+  else if (local_density) log.printf("The g(r) will be normalized with the local density. Derivatives might be wrong. \n");
   else log.printf("The g(r) will be normalized with a density N/V . \n");
 
   // And setup the ActionWithVessel
@@ -138,6 +143,7 @@ MultiColvarBase(ao)
   // Set the link cell cutoff
   setLinkCellCutoff( maxr + 3*sigma );
   rcut2 = (maxr + 3*sigma)*(maxr + 3*sigma);
+  rcut = std::sqrt(rcut2);
   log.printf("Setting cut off to %f \n ", maxr + 3*sigma );
 }
 
@@ -151,6 +157,7 @@ double PairEntropies::compute( const unsigned& tindex, AtomValuePack& myatoms ) 
    vector<Tensor> gofrVirial(nhist);
    Tensor virial;
    // Construct g(r)
+   int countNeigh=0;
    for(unsigned i=1;i<myatoms.getNumberOfAtoms();++i){
       Vector& distance=myatoms.getPosition(i);  
       if ( (d2=distance[0]*distance[0])<rcut2 && (d2+=distance[1]*distance[1])<rcut2 && (d2+=distance[2]*distance[2])<rcut2) {
@@ -175,13 +182,18 @@ double PairEntropies::compute( const unsigned& tindex, AtomValuePack& myatoms ) 
                gofrVirial[j] += vv;
              }
 	   } 
+           countNeigh += 1;
       }
    }
    // Normalize g(r)
    double volume=getBox().determinant(); 
    double density;
-   if (density_given<0) density=getNumberOfAtoms()/volume;
-   else density=density_given;
+   if (density_given>0) density=density_given;
+   else if (local_density) density= (double) countNeigh / ( (4./3.)*pi*rcut*rcut*rcut);
+   else density=getNumberOfAtoms()/volume;
+   //log.printf("rcut %f \n", rcut);
+   //log.printf("countNeigh %d \n", countNeigh);
+   //log.printf("density %f \n", density);
    for(unsigned i=0;i<nhist;++i){
      double x=deltar*(i+0.5);
      double normConstant = 4*pi*density*x*x;
