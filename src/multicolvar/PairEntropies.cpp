@@ -75,9 +75,10 @@ private:
   double maxr, sigma;
   unsigned nhist;
   double density_given;
-  bool local_density;
+  bool local_density, one_body;
   double deltar;
   unsigned deltaBin;
+  double temperature, mass, deBroglie3;
   // Integration routine
   double integrate(vector<double> integrand, double delta)const;
   Vector integrate(vector<Vector> integrand, double delta)const;
@@ -102,8 +103,10 @@ void PairEntropies::registerKeywords( Keywords& keys ){
   keys.add("compulsory","NHIST","300","Number of bins in the rdf ");
   keys.add("compulsory","SIGMA","0.1","Width of gaussians ");
   keys.add("optional","DENSITY","Density to normalize the g(r). If not specified, N/V is used");
+  keys.add("optional","TEMPERATURE","Temperature in Kelvin. It is compulsory when keyword ONE_BODY is used");
+  keys.add("optional","MASS","Mass in g/mol. It is compulsory when keyword ONE_BODY is used");
   keys.addFlag("LOCAL_DENSITY",false,"Use the local density to normalize g(r). If not specified, N/V is used");
-
+  keys.addFlag("ONE_BODY",false,"Add the one body term (S1 = 5/2 - ln(dens*deBroglie^3) ) to the entropy");
   // Use actionWithDistributionKeywords
   keys.use("MEAN"); keys.use("MORE_THAN"); keys.use("LESS_THAN"); keys.use("MAX");
   keys.use("MIN"); keys.use("BETWEEN"); keys.use("HISTOGRAM"); keys.use("MOMENTS");
@@ -127,7 +130,23 @@ MultiColvarBase(ao)
   if (density_given>0) log.printf("The g(r) will be normalized with a density %f . \n", density_given);
   else if (local_density) log.printf("The g(r) will be normalized with the local density. Derivatives might be wrong. \n");
   else log.printf("The g(r) will be normalized with a density N/V . \n");
-
+  parseFlag("ONE_BODY",one_body);
+  temperature = -1.;
+  mass = -1.;
+  parse("TEMPERATURE",temperature);
+  parse("MASS",mass);
+  if (one_body) {
+     if (temperature>0 && mass>0 && local_density ) log.printf("The one-body entropy will be added to the pair entropy. \n");
+     if (temperature<0) error("ONE_BODY keyword used but TEMPERATURE not given. Specify a temperature greater than 0 in Kelvin using the TEMPERATURE keyword. ");
+     if (mass<0) error("ONE_BODY keyword used but MASS not given. Specify a mass greater than 0 in g/mol using the MASS keyword. ");
+     if (!local_density) error("ONE_BODY keyword used but LOCAL_DENSITY not given. LOCAL_DENSITY flag is compulsory with ONE_BODY.");
+     double planck = 6.62607004e-16; // nm2 kg / s 
+     double boltzmann = 1.38064852e-5; // nm2 kg s-2 K-1
+     double avogadro= 6.0221409e23 ;
+     double deBroglie = planck/std::sqrt(2*pi*(mass*1.e-3/avogadro)*boltzmann*temperature);
+     deBroglie3 = deBroglie*deBroglie*deBroglie;
+     log.printf("The thermal deBroglie wavelength is %f nm. Be sure to use nm as units of distance. \n", deBroglie);
+  }
   // And setup the ActionWithVessel
   std::vector<AtomNumber> all_atoms; setupMultiColvarBase( all_atoms ); checkRead();
 
@@ -218,6 +237,9 @@ double PairEntropies::compute( const unsigned& tindex, AtomValuePack& myatoms ) 
    }
    // Integrate to obtain pair entropy;
    double entropy = -2*pi*density*integrate(integrand,deltar); 
+   if (one_body) {
+      entropy += 5./2. - std::log(density*deBroglie3);
+   }
    if (!doNotCalculateDerivatives()) {
      // Construct integrand and integrate derivatives
      for(unsigned i=0;i<myatoms.getNumberOfAtoms();++i) {
