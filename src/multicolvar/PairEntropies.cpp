@@ -75,7 +75,7 @@ private:
   double maxr, sigma;
   unsigned nhist;
   double density_given;
-  bool local_density, one_body;
+  bool local_density, one_body, no_two_body;
   double deltar;
   unsigned deltaBin;
   double temperature, mass, deBroglie3;
@@ -107,6 +107,7 @@ void PairEntropies::registerKeywords( Keywords& keys ){
   keys.add("optional","MASS","Mass in g/mol. It is compulsory when keyword ONE_BODY is used");
   keys.addFlag("LOCAL_DENSITY",false,"Use the local density to normalize g(r). If not specified, N/V is used");
   keys.addFlag("ONE_BODY",false,"Add the one body term (S1 = 5/2 - ln(dens*deBroglie^3) ) to the entropy");
+  keys.addFlag("NO_TWO_BODY",false,"Remove the two-body term. Only the one-body term is kept. This flag can only be used along with the ONE_BODY flag.");
   // Use actionWithDistributionKeywords
   keys.use("MEAN"); keys.use("MORE_THAN"); keys.use("LESS_THAN"); keys.use("MAX");
   keys.use("MIN"); keys.use("BETWEEN"); keys.use("HISTOGRAM"); keys.use("MOMENTS");
@@ -146,6 +147,11 @@ MultiColvarBase(ao)
      double deBroglie = planck/std::sqrt(2*pi*(mass*1.e-3/avogadro)*boltzmann*temperature);
      deBroglie3 = deBroglie*deBroglie*deBroglie;
      log.printf("The thermal deBroglie wavelength is %f nm. Be sure to use nm as units of distance. \n", deBroglie);
+  }
+  parseFlag("NO_TWO_BODY",no_two_body);
+  if (no_two_body) {
+     if (one_body) log.printf("The two-body entropy will be removed from the pair entropy. Only the one-body term is kept. \n");
+     else error("NO_TWO_BODY keyword used but ONE_BODY not specified. ONE_BODY flag is compulsory with NO_TWO_BODY.");
   }
   // And setup the ActionWithVessel
   std::vector<AtomNumber> all_atoms; setupMultiColvarBase( all_atoms ); checkRead();
@@ -236,7 +242,10 @@ double PairEntropies::compute( const unsigned& tindex, AtomValuePack& myatoms ) 
      }
    }
    // Integrate to obtain pair entropy;
-   double entropy = -2*pi*density*integrate(integrand,deltar); 
+   double entropy=0.;
+   if (!no_two_body) {
+      entropy += -2*pi*density*integrate(integrand,deltar); 
+   }
    if (one_body) {
       entropy += 5./2. - std::log(density*deBroglie3);
    }
