@@ -70,12 +70,15 @@ PAIRENTROPIES ...
 
 class PairEntropies : public MultiColvarBase {
 private:
-  double rcut2;
+  double rcut2, rcut;
   double invSqrt2piSigma, sigmaSqr2, sigmaSqr;
   double maxr, sigma;
   unsigned nhist;
+  double density_given;
+  bool local_density, one_body, no_two_body;
   double deltar;
   unsigned deltaBin;
+  double temperature, mass, deBroglie3;
   // Integration routine
   double integrate(vector<double> integrand, double delta)const;
   Vector integrate(vector<Vector> integrand, double delta)const;
@@ -99,6 +102,12 @@ void PairEntropies::registerKeywords( Keywords& keys ){
   keys.add("compulsory","MAXR","1","Maximum distance for the radial distribution function ");
   keys.add("compulsory","NHIST","300","Number of bins in the rdf ");
   keys.add("compulsory","SIGMA","0.1","Width of gaussians ");
+  keys.add("optional","DENSITY","Density to normalize the g(r). If not specified, N/V is used");
+  keys.add("optional","TEMPERATURE","Temperature in Kelvin. It is compulsory when keyword ONE_BODY is used");
+  keys.add("optional","MASS","Mass in g/mol. It is compulsory when keyword ONE_BODY is used");
+  keys.addFlag("LOCAL_DENSITY",false,"Use the local density to normalize g(r). If not specified, N/V is used");
+  keys.addFlag("ONE_BODY",false,"Add the one body term (S1 = 5/2 - ln(dens*deBroglie^3) ) to the entropy");
+  keys.addFlag("NO_TWO_BODY",false,"Remove the two-body term. Only the one-body term is kept. This flag can only be used along with the ONE_BODY flag.");
   // Use actionWithDistributionKeywords
   keys.use("MEAN"); keys.use("MORE_THAN"); keys.use("LESS_THAN"); keys.use("MAX");
   keys.use("MIN"); keys.use("BETWEEN"); keys.use("HISTOGRAM"); keys.use("MOMENTS");
@@ -111,12 +120,39 @@ Action(ao),
 MultiColvarBase(ao)
 {
   parse("MAXR",maxr);
-  log.printf("Integration in the interval from 0. to %f nm. \n", maxr );
+  log.printf("Integration in the interval from 0. to %f . \n", maxr );
   parse("NHIST",nhist);
   log.printf("The interval is partitioned in %u equal parts and the integration is perfromed with the trapezoid rule. \n", nhist );
   parse("SIGMA",sigma);
-  log.printf("The pair distribution function is calculated with a Gaussian kernel with deviation %f nm. \n", sigma);
-
+  log.printf("The pair distribution function is calculated with a Gaussian kernel with deviation %f . \n", sigma);
+  density_given = -1;
+  parse("DENSITY",density_given);
+  parseFlag("LOCAL_DENSITY",local_density);
+  if (density_given>0) log.printf("The g(r) will be normalized with a density %f . \n", density_given);
+  else if (local_density) log.printf("The g(r) will be normalized with the local density. Derivatives might be wrong. \n");
+  else log.printf("The g(r) will be normalized with a density N/V . \n");
+  parseFlag("ONE_BODY",one_body);
+  temperature = -1.;
+  mass = -1.;
+  parse("TEMPERATURE",temperature);
+  parse("MASS",mass);
+  if (one_body) {
+     if (temperature>0 && mass>0 && local_density ) log.printf("The one-body entropy will be added to the pair entropy. \n");
+     if (temperature<0) error("ONE_BODY keyword used but TEMPERATURE not given. Specify a temperature greater than 0 in Kelvin using the TEMPERATURE keyword. ");
+     if (mass<0) error("ONE_BODY keyword used but MASS not given. Specify a mass greater than 0 in g/mol using the MASS keyword. ");
+     if (!local_density) error("ONE_BODY keyword used but LOCAL_DENSITY not given. LOCAL_DENSITY flag is compulsory with ONE_BODY.");
+     double planck = 6.62607004e-16; // nm2 kg / s 
+     double boltzmann = 1.38064852e-5; // nm2 kg s-2 K-1
+     double avogadro= 6.0221409e23 ;
+     double deBroglie = planck/std::sqrt(2*pi*(mass*1.e-3/avogadro)*boltzmann*temperature);
+     deBroglie3 = deBroglie*deBroglie*deBroglie;
+     log.printf("The thermal deBroglie wavelength is %f nm. Be sure to use nm as units of distance. \n", deBroglie);
+  }
+  parseFlag("NO_TWO_BODY",no_two_body);
+  if (no_two_body) {
+     if (one_body) log.printf("The two-body entropy will be removed from the pair entropy. Only the one-body term is kept. \n");
+     else error("NO_TWO_BODY keyword used but ONE_BODY not specified. ONE_BODY flag is compulsory with NO_TWO_BODY.");
+  }
   // And setup the ActionWithVessel
   std::vector<AtomNumber> all_atoms; setupMultiColvarBase( all_atoms ); checkRead();
 
@@ -126,11 +162,13 @@ MultiColvarBase(ao)
   sigmaSqr2 = 2.*sigma*sigma;
   sigmaSqr = sigma*sigma;
   deltar=maxr/nhist;
+  if(deltar>sigma) error("Bin size too large! Increase NHIST");
   deltaBin = std::floor(3*sigma/deltar); //3*sigma is 99.7 %
 
   // Set the link cell cutoff
   setLinkCellCutoff( maxr + 3*sigma );
   rcut2 = (maxr + 3*sigma)*(maxr + 3*sigma);
+  rcut = std::sqrt(rcut2);
   log.printf("Setting cut off to %f \n ", maxr + 3*sigma );
 }
 
@@ -144,6 +182,7 @@ double PairEntropies::compute( const unsigned& tindex, AtomValuePack& myatoms ) 
    vector<Tensor> gofrVirial(nhist);
    Tensor virial;
    // Construct g(r)
+   int countNeigh=0;
    for(unsigned i=1;i<myatoms.getNumberOfAtoms();++i){
       Vector& distance=myatoms.getPosition(i);  
       if ( (d2=distance[0]*distance[0])<rcut2 && (d2+=distance[1]*distance[1])<rcut2 && (d2+=distance[2]*distance[2])<rcut2) {
@@ -168,11 +207,18 @@ double PairEntropies::compute( const unsigned& tindex, AtomValuePack& myatoms ) 
                gofrVirial[j] += vv;
              }
 	   } 
+           countNeigh += 1;
       }
    }
    // Normalize g(r)
    double volume=getBox().determinant(); 
-   double density=getNumberOfAtoms()/volume;
+   double density;
+   if (density_given>0) density=density_given;
+   else if (local_density) density= (double) countNeigh / ( (4./3.)*pi*rcut*rcut*rcut);
+   else density=getNumberOfAtoms()/volume;
+   //log.printf("rcut %f \n", rcut);
+   //log.printf("countNeigh %d \n", countNeigh);
+   //log.printf("density %f \n", density);
    for(unsigned i=0;i<nhist;++i){
      double x=deltar*(i+0.5);
      double normConstant = 4*pi*density*x*x;
@@ -196,7 +242,13 @@ double PairEntropies::compute( const unsigned& tindex, AtomValuePack& myatoms ) 
      }
    }
    // Integrate to obtain pair entropy;
-   double entropy = -2*pi*density*integrate(integrand,deltar); 
+   double entropy=0.;
+   if (!no_two_body) {
+      entropy += -2*pi*density*integrate(integrand,deltar); 
+   }
+   if (one_body) {
+      entropy += 5./2. - std::log(density*deBroglie3);
+   }
    if (!doNotCalculateDerivatives()) {
      // Construct integrand and integrate derivatives
      for(unsigned i=0;i<myatoms.getNumberOfAtoms();++i) {

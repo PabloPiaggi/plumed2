@@ -68,6 +68,8 @@ class PairEntropy : public Colvar {
   NeighborList *nl;
   bool invalidateList;
   bool firsttime;
+  bool doOutputGofr;
+  bool doOutputIntegrand;
   double maxr, sigma;
   unsigned nhist;
   double rcut2;
@@ -80,6 +82,9 @@ class PairEntropy : public Colvar {
   Tensor integrate(vector<Tensor> integrand, double delta)const;
   // Kernel to calculate g(r)
   double kernel(double distance, double&der)const;
+  // Output gofr and integrand
+  void outputGofr(vector<double> gofr);
+  void outputIntegrand(vector<double> integrand);
 public:
   explicit PairEntropy(const ActionOptions&);
   ~PairEntropy();
@@ -96,6 +101,8 @@ void PairEntropy::registerKeywords( Keywords& keys ){
   keys.addFlag("SERIAL",false,"Perform the calculation in serial - for debug purpose");
   keys.addFlag("PAIR",false,"Pair only 1st element of the 1st group with 1st element in the second, etc");
   keys.addFlag("NLIST",false,"Use a neighbour list to speed up the calculation");
+  keys.addFlag("OUTPUT_GOFR",false,"Output g(r)");
+  keys.addFlag("OUTPUT_INTEGRAND",false,"Output integrand");
   keys.add("optional","NL_CUTOFF","The cutoff for the neighbour list");
   keys.add("optional","NL_STRIDE","The frequency with which we are updating the atoms in the neighbour list");
   keys.add("atoms","GROUPA","First list of atoms");
@@ -114,6 +121,8 @@ firsttime(true)
 {
 
   parseFlag("SERIAL",serial);
+  parseFlag("OUTPUT_GOFR",doOutputGofr);
+  parseFlag("OUTPUT_INTEGRAND",doOutputIntegrand);
 
   vector<AtomNumber> ga_lista,gb_lista;
   parseAtomList("GROUPA",ga_lista);
@@ -294,6 +303,8 @@ void PairEntropy::calculate()
       gofrPrime[j][k] /= normConstant;
     }
   }
+  // Output of gofr
+  if (doOutputGofr && rank==0) outputGofr(gofr);
   // Construct integrand
   vector<double> integrand(nhist);
   for(unsigned j=0;j<nhist;++j){
@@ -305,40 +316,45 @@ void PairEntropy::calculate()
       integrand[j] = (gofr[j]*logGofr[j]-gofr[j]+1)*x*x;
     }
   }
+  // Output of integrands
+  if (doOutputIntegrand && rank==0) outputIntegrand(integrand);
   // Integrate to obtain pair entropy;
   pairEntropy = -2*pi*density*integrate(integrand,deltar);
   // Construct integrand and integrate derivatives
-  for(unsigned j=0;j<getNumberOfAtoms();++j) {
-    vector<Vector> integrandDerivatives(nhist);
-    for(unsigned k=0;k<nhist;++k){
-      double x=deltar*(k+0.5);
-      if (gofr[k]>1.e-10) {
-        integrandDerivatives[k] = gofrPrime[k][j]*logGofr[k]*x*x;
+  if (!doNotCalculateDerivatives() ) {
+    for(unsigned int j=rank;j<getNumberOfAtoms();j+=stride) {
+      vector<Vector> integrandDerivatives(nhist);
+      for(unsigned k=0;k<nhist;++k){
+        double x=deltar*(k+0.5);
+        if (gofr[k]>1.e-10) {
+          integrandDerivatives[k] = gofrPrime[k][j]*logGofr[k]*x*x;
+        }
+      }
+      // Integrate
+      deriv[j] = -2*pi*density*integrate(integrandDerivatives,deltar);
+    }
+    comm.Sum(&deriv[0][0],3*getNumberOfAtoms());
+    // Virial of positions
+    // Construct virial integrand
+    vector<Tensor> integrandVirial(nhist);
+    for(unsigned j=0;j<nhist;++j){
+      double x=deltar*(j+0.5);
+      if (gofr[j]>1.e-10) {
+        integrandVirial[j] = gofrVirial[j]*logGofr[j]*x*x;
       }
     }
-    // Integrate
-    deriv[j] = -2*pi*density*integrate(integrandDerivatives,deltar);
-  }
-  // Virial of positions
-  // Construct virial integrand
-  vector<Tensor> integrandVirial(nhist);
-  for(unsigned j=0;j<nhist;++j){
-    double x=deltar*(j+0.5);
-    if (gofr[j]>1.e-10) {
-      integrandVirial[j] = gofrVirial[j]*logGofr[j]*x*x;
+    // Integrate virial
+    virial = -2*pi*density*integrate(integrandVirial,deltar);
+    // Virial of volume
+    // Construct virial integrand
+    vector<double> integrandVirialVolume(nhist);
+    for(unsigned j=0;j<nhist;j+=1) {
+      double x=deltar*(j+0.5);
+      integrandVirialVolume[j] = (-gofr[j]+1)*x*x;
     }
+    // Integrate virial
+    virial += -2*pi*density*integrate(integrandVirialVolume,deltar)*Tensor::identity();
   }
-  // Integrate virial
-  virial = -2*pi*density*integrate(integrandVirial,deltar);
-  // Virial of volume
-  // Construct virial integrand
-  vector<double> integrandVirialVolume(nhist);
-  for(unsigned j=0;j<nhist;j+=1) {
-    double x=deltar*(j+0.5);
-    integrandVirialVolume[j] = (-gofr[j]+1)*x*x;
-  }
-  // Integrate virial
-  virial += -2*pi*density*integrate(integrandVirialVolume,deltar)*Tensor::identity();
   // Assign output quantities
   for(unsigned i=0;i<deriv.size();++i) setAtomsDerivatives(i,deriv[i]);
   setValue           (pairEntropy);
@@ -387,6 +403,27 @@ Tensor PairEntropy::integrate(vector<Tensor> integrand, double delta)const{
   result *= delta;
   return result;
 }
+
+void PairEntropy::outputGofr(vector<double> gofr) {
+  PLMD::OFile gofrOfile;
+  gofrOfile.open("gofr.txt");
+  for(unsigned i=0;i<gofr.size();++i){
+     double r=deltar*(i+0.5);
+     gofrOfile.printField("r",r).printField("gofr",gofr[i]).printField();
+  }
+  gofrOfile.close();
+}
+
+void PairEntropy::outputIntegrand(vector<double> integrand) {
+  PLMD::OFile gofrOfile;
+  gofrOfile.open("integrand.txt");
+  for(unsigned i=0;i<integrand.size();++i){
+     double r=deltar*(i+0.5);
+     gofrOfile.printField("r",r).printField("integrand",integrand[i]).printField();
+  }
+  gofrOfile.close();
+}
+
 
 }
 }
