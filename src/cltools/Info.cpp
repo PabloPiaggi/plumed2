@@ -1,5 +1,5 @@
 /* +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-   Copyright (c) 2012-2016 The plumed team
+   Copyright (c) 2012-2017 The plumed team
    (see the PEOPLE file at the root of the distribution for a list of names)
 
    See http://www.plumed.org for more information.
@@ -30,7 +30,7 @@
 using namespace std;
 
 namespace PLMD {
-namespace cltools{
+namespace cltools {
 
 //+PLUMEDOC TOOLS info
 /*
@@ -50,20 +50,20 @@ plumed info --root
 //+ENDPLUMEDOC
 
 class Info:
-public CLTool
+  public CLTool
 {
 public:
   static void registerKeywords( Keywords& keys );
   explicit Info(const CLToolOptions& co );
   int main(FILE* in, FILE*out,Communicator& pc);
-  string description()const{
+  string description()const {
     return "provide informations about plumed";
   }
 };
 
 PLUMED_REGISTER_CLTOOL(Info,"info")
 
-void Info::registerKeywords( Keywords& keys ){
+void Info::registerKeywords( Keywords& keys ) {
   CLTool::registerKeywords( keys );
   keys.addFlag("--configuration",false,"prints the configuration file");
   keys.addFlag("--root",false,"print the location of the root directory for the plumed source");
@@ -72,34 +72,47 @@ void Info::registerKeywords( Keywords& keys ){
   keys.addFlag("--version",false,"print the version number");
   keys.addFlag("--long-version",false,"print the version number (long version)");
   keys.addFlag("--git-version",false,"print the version number (git version, if available)");
+  keys.addFlag("--include-dir",false,"print the location of the include dir");
 }
 
 Info::Info(const CLToolOptions& co ):
-CLTool(co)
+  CLTool(co)
 {
   inputdata=commandline;
 }
 
-int Info::main(FILE* in, FILE*out,Communicator& pc){
+int Info::main(FILE* in, FILE*out,Communicator& pc) {
 
- bool printconfiguration; parseFlag("--configuration",printconfiguration);
- bool printroot; parseFlag("--root",printroot);
- bool printuserdoc; parseFlag("--user-doc",printuserdoc);
- bool printdeveloperdoc; parseFlag("--developer-doc",printdeveloperdoc);
- bool printversion; parseFlag("--version",printversion);
- bool printlongversion; parseFlag("--long-version",printlongversion);
- bool printgitversion; parseFlag("--git-version",printgitversion);
- if(printroot) fprintf(out,"%s\n",config::getPlumedRoot().c_str());
- if(printconfiguration) fprintf(out,"%s",config::getMakefile().c_str());
- std::string userdoc=config::getPlumedHtmldir()+"/user-doc/html/index.html";
- std::string developerdoc=config::getPlumedHtmldir()+"/developer-doc/html/index.html";
- if(printuserdoc) fprintf(out,"%s\n",userdoc.c_str());
- if(printdeveloperdoc) fprintf(out,"%s\n",developerdoc.c_str());
- if(printversion) fprintf(out,"%s\n",config::getVersion().c_str());
- if(printlongversion) fprintf(out,"%s\n",config::getVersionLong().c_str());
- if(printgitversion) fprintf(out,"%s\n",config::getVersionGit().c_str());
+  bool printconfiguration; parseFlag("--configuration",printconfiguration);
+  bool printroot; parseFlag("--root",printroot);
+  bool printuserdoc; parseFlag("--user-doc",printuserdoc);
+  bool printdeveloperdoc; parseFlag("--developer-doc",printdeveloperdoc);
+  bool printversion; parseFlag("--version",printversion);
+  bool printlongversion; parseFlag("--long-version",printlongversion);
+  bool printgitversion; parseFlag("--git-version",printgitversion);
+  bool printincludedir; parseFlag("--include-dir",printincludedir);
+  if(printroot) fprintf(out,"%s\n",config::getPlumedRoot().c_str());
+  if(printconfiguration) fprintf(out,"%s",config::getMakefile().c_str());
+  if(printincludedir) fprintf(out,"%s\n",config::getPlumedIncludedir().c_str());
+  if(printuserdoc) {
+    std::string userdoc=config::getPlumedHtmldir()+"/user-doc/html/index.html";
+    FILE *ff=std::fopen(userdoc.c_str(),"r");
+    if(ff) std::fclose(ff);
+    else userdoc="http://plumed.github.io/doc-v" + config::getVersion() + "/user-doc/html/index.html";
+    fprintf(out,"%s\n",userdoc.c_str());
+  }
+  if(printdeveloperdoc) {
+    std::string developerdoc=config::getPlumedHtmldir()+"/developer-doc/html/index.html";
+    FILE *ff=std::fopen(developerdoc.c_str(),"r");
+    if(ff) std::fclose(ff);
+    else developerdoc="http://plumed.github.io/doc-v" + config::getVersion() + "/developer-doc/html/index.html";
+    fprintf(out,"%s\n",developerdoc.c_str());
+  }
+  if(printversion) fprintf(out,"%s\n",config::getVersion().c_str());
+  if(printlongversion) fprintf(out,"%s\n",config::getVersionLong().c_str());
+  if(printgitversion) fprintf(out,"%s\n",config::getVersionGit().c_str());
 
- return 0;
+  return 0;
 }
 
 

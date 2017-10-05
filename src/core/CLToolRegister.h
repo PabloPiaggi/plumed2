@@ -28,18 +28,19 @@
 #include <vector>
 #include <iosfwd>
 #include "tools/Keywords.h"
+#include <memory>
 
-namespace PLMD{
+namespace PLMD {
 
 class CLTool;
 class CLToolOptions;
 
 /// Same as ActionRegister, but for CLTools
-class CLToolRegister{
+class CLToolRegister {
 /// Write on a stream the list of registered directives
   friend std::ostream &operator<<(std::ostream &,const CLToolRegister&);
 /// Pointer to a function which, given the options, create an CLTool
-  typedef CLTool*(*creator_pointer)(const CLToolOptions&);
+  typedef std::unique_ptr<CLTool>(*creator_pointer)(const CLToolOptions&);
 /// Pointer to a function which, returns the keywords allowed
   typedef void(*keywords_pointer)(Keywords&);
 /// Map cltool to a function which creates the related object
@@ -58,13 +59,13 @@ public:
   bool check(std::string cltool);
 /// Create an CLTool of the type indicated in the options
 /// \param ao object containing information for initialization, such as the full input line, a pointer to PlumedMain, etc
-  CLTool* create(const CLToolOptions&ao);
+  std::unique_ptr<CLTool> create(const CLToolOptions&ao);
   void remove(creator_pointer);
   ~CLToolRegister();
 /// Returns a list of the allowed CLTools
   std::vector<std::string> list()const;
 /// Print out the instructions for using the tool in html ready for input into the manual
-  bool printManual(const std::string& cltool); 
+  bool printManual(const std::string& cltool);
 };
 
 /// Function returning a reference to the CLToolRegister.
@@ -87,7 +88,7 @@ std::ostream & operator<<(std::ostream &log,const CLToolRegister&ar);
 /// This macro should be used in the .cpp file of the corresponding class
 #define PLUMED_REGISTER_CLTOOL(classname,directive) \
   static class classname##RegisterMe{ \
-    static PLMD::CLTool* create(const PLMD::CLToolOptions&ao){return new classname(ao);} \
+    static std::unique_ptr<PLMD::CLTool> create(const PLMD::CLToolOptions&ao){return std::unique_ptr<classname>(new classname(ao));} \
   public: \
     classname##RegisterMe(){PLMD::cltoolRegister().add(directive,create,classname::registerKeywords);} \
     ~classname##RegisterMe(){PLMD::cltoolRegister().remove(create);} \

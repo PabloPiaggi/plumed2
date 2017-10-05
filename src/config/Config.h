@@ -1,5 +1,5 @@
 /* +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-   Copyright (c) 2011-2016 The plumed team
+   Copyright (c) 2011-2017 The plumed team
    (see the PEOPLE file at the root of the distribution for a list of names)
 
    See http://www.plumed.org for more information.
@@ -24,8 +24,8 @@
 
 #include <string>
 
-namespace PLMD{
-namespace config{
+namespace PLMD {
+namespace config {
 
 /// Return the extension of shared libraries on this system.
 /// It is either "so" or "dylib". In case shared libraries are disabled, it returns an empty string.
@@ -53,7 +53,7 @@ Return a string containing a sequence of environment variables.
 
 The returned string has the form:
 \verbatim
-PLUMED_ROOT=/path PLUMED_HTMLDIR=/path ... etc
+env PLUMED_ROOT=/path env PLUMED_HTMLDIR=/path ... etc
 \endverbatim
 This string is used internally in PLUMED to run scripts located in plumedroot/script.
 For instance, the `patch` script can be run executing the following command:

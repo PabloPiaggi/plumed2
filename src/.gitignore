@@ -12,14 +12,15 @@
 !/config
 !/core
 !/crystallization
+!/drr
 !/eds
 !/function
 !/generic
 !/gridtools
-!/header.sh
-!/release.sh
 !/imd
+!/isdb
 !/lapack
+!/lepton
 !/lib
 !/main
 !/maketools
@@ -27,13 +28,19 @@
 !/manyrestraints
 !/molfile
 !/multicolvar
+!/python
+!/pamm
 !/reference
 !/secondarystructure
 !/setup
 !/tools
 !/vatom
+!/ves
 !/vesselbase
 !/wrapper
+!/header.sh
+!/release.sh
+!/astyle.sh
 
 
 # And just ignore these files
