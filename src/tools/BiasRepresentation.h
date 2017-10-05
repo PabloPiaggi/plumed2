@@ -26,6 +26,7 @@
 #include "KernelFunctions.h"
 #include "File.h"
 #include "Grid.h"
+#include <memory>
 
 namespace PLMD {
 
@@ -50,8 +51,6 @@ public:
                      const std::vector<unsigned> & nbin, bool doInt, double lowI_, double uppI_);
   /// create a histogram with grid representation and sigmas in input
   BiasRepresentation(const std::vector<Value*> & tmpvalues, Communicator &cc, const std::vector<std::string> & gmin, const std::vector<std::string> & gmax, const std::vector<unsigned> & nbin, const std::vector<double> & sigma);
-  /// destructor
-  ~BiasRepresentation();
   /// retrieve the number of dimension of the representation
   unsigned 	getNumberOfDimensions();
   /// add the grid to the representation
@@ -91,11 +90,11 @@ private:
   double uppI_;
   std::vector<Value*> values;
   std::vector<std::string> names;
-  std::vector<KernelFunctions*> hills;
+  std::vector<std::unique_ptr<KernelFunctions>> hills;
   std::vector<double> biasf;
   std::vector<double> histosigma;
   Communicator& mycomm;
-  Grid* BiasGrid_;
+  std::unique_ptr<Grid> BiasGrid_;
 };
 
 }
