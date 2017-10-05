@@ -40,6 +40,7 @@
 #include "tools/OpenMP.h"
 #include "tools/Tools.h"
 #include "tools/Stopwatch.h"
+#include "DataFetchingObject.h"
 #include <cstdlib>
 #include <cstring>
 #include <set>
@@ -62,23 +63,22 @@ const std::unordered_map<std::string, int> & plumedMainWordMap() {
 }
 
 PlumedMain::PlumedMain():
-  comm(*new Communicator),
-  multi_sim_comm(*new Communicator),
-  dlloader(*new DLLoader),
-  cltool(NULL),
-  stopwatch(*new Stopwatch),
-  grex(NULL),
+  comm_fwd(new Communicator),
+  multi_sim_comm_fwd(new Communicator),
+  dlloader_fwd(new DLLoader),
+  stopwatch_fwd(new Stopwatch),
   initialized(false),
-  log(*new Log),
-  citations(*new Citations),
+  log_fwd(new Log),
+  citations_fwd(new Citations),
   step(0),
   active(false),
+  mydatafetcher(DataFetchingObject::create(sizeof(double),*this)),
   endPlumed(false),
-  atoms(*new Atoms(*this)),
-  actionSet(*new ActionSet(*this)),
+  atoms_fwd(new Atoms(*this)),
+  actionSet_fwd(new ActionSet(*this)),
   bias(0.0),
   work(0.0),
-  exchangePatterns(*new(ExchangePatterns)),
+  exchangePatterns_fwd(new(ExchangePatterns)),
   exchangeStep(false),
   restart(false),
   doCheckPoint(false),
@@ -97,17 +97,6 @@ PlumedMain::~PlumedMain() {
   stopwatch.start();
   stopwatch.stop();
   if(initialized) log<<stopwatch;
-  delete &exchangePatterns;
-  delete &actionSet;
-  delete &citations;
-  delete &atoms;
-  delete &log;
-  if(grex)  delete grex;
-  delete &stopwatch;
-  if(cltool) delete cltool;
-  delete &dlloader;
-  delete &comm;
-  delete &multi_sim_comm;
 }
 
 /////////////////////////////////////////////////////////////
@@ -260,6 +249,21 @@ void PlumedMain::cmd(const std::string & word,void*val) {
       CHECK_INIT(initialized,word);
       atoms.clearFullList();
       break;
+    case cmd_getDataRank:
+      CHECK_INIT(initialized,words[0]); plumed_assert(nw==2 || nw==3);
+      if( nw==2 ) DataFetchingObject::get_rank( actionSet, words[1], "", static_cast<long*>(val) );
+      else DataFetchingObject::get_rank( actionSet, words[1], words[2], static_cast<long*>(val) );
+      break;
+    case cmd_getDataShape:
+      CHECK_INIT(initialized,words[0]); plumed_assert(nw==2 || nw==3);
+      if( nw==2 ) DataFetchingObject::get_shape( actionSet, words[1], "", static_cast<long*>(val) );
+      else DataFetchingObject::get_shape( actionSet, words[1], words[2], static_cast<long*>(val) );
+      break;
+    case cmd_setMemoryForData:
+      CHECK_INIT(initialized,words[0]); plumed_assert(nw==2 || nw==3);
+      if( nw==2 ) mydatafetcher->setData( words[1], "", val );
+      else mydatafetcher->setData( words[1], words[2], val );
+      break;
     case cmd_read:
       CHECK_INIT(initialized,word);
       if(val)readInputFile(static_cast<char*>(val));
@@ -287,6 +291,7 @@ void PlumedMain::cmd(const std::string & word,void*val) {
       CHECK_NOTINIT(initialized,word);
       CHECK_NOTNULL(val,word);
       atoms.setRealPrecision(*static_cast<int*>(val));
+      mydatafetcher=DataFetchingObject::create(*static_cast<int*>(val),*this);
       break;
     case cmd_setMDLengthUnits:
       CHECK_NOTINIT(initialized,word);
@@ -439,7 +444,7 @@ void PlumedMain::cmd(const std::string & word,void*val) {
       *(static_cast<int*>(val))=(actionRegister().check(words[1]) ? 1:0);
       break;
     case cmd_GREX:
-      if(!grex) grex=new GREX(*this);
+      if(!grex) grex.reset(new GREX(*this));
       plumed_massert(grex,"error allocating grex");
       {
         std::string kk=words[1];
@@ -449,7 +454,7 @@ void PlumedMain::cmd(const std::string & word,void*val) {
       break;
     case cmd_CLTool:
       CHECK_NOTINIT(initialized,word);
-      if(!cltool) cltool=new CLToolMain;
+      if(!cltool) cltool.reset(new CLToolMain);
       {
         std::string kk=words[1];
         for(unsigned i=2; i<words.size(); i++) kk+=" "+words[i];
@@ -543,7 +548,7 @@ void PlumedMain::readInputWords(const std::vector<std::string> & words) {
   } else {
     std::vector<std::string> interpreted(words);
     Tools::interpretLabel(interpreted);
-    Action* action=actionRegister().create(ActionOptions(*this,interpreted));
+    std::unique_ptr<Action> action(actionRegister().create(ActionOptions(*this,interpreted)));
     if(!action) {
       log<<"ERROR\n";
       log<<"I cannot understand line:";
@@ -553,7 +558,7 @@ void PlumedMain::readInputWords(const std::vector<std::string> & words) {
       plumed_merror("I cannot understand line " + interpreted[0] + " " + interpreted[1]);
     };
     action->checkRead();
-    actionSet.push_back(action);
+    actionSet.emplace_back(std::move(action));
   };
 
   pilots=actionSet.select<ActionPilot*>();
@@ -599,7 +604,7 @@ void PlumedMain::prepareDependencies() {
   }
 
 // for optimization, an "active" flag remains false if no action at all is active
-  active=false;
+  active=mydatafetcher->activate();
   for(unsigned i=0; i<pilots.size(); ++i) {
     if(pilots[i]->onStep()) {
       pilots[i]->activate();
@@ -636,6 +641,7 @@ void PlumedMain::performCalc() {
   justCalculate();
   backwardPropagate();
   update();
+  mydatafetcher->finishDataGrab();
 }
 
 void PlumedMain::waitData() {
@@ -653,7 +659,8 @@ void PlumedMain::justCalculate() {
 
   int iaction=0;
 // calculate the active actions in order (assuming *backward* dependence)
-  for(const auto & p : actionSet) {
+  for(const auto & pp : actionSet) {
+    Action* p(pp.get());
     if(p->isActive()) {
       std::string actionNumberLabel;
       if(detailedTimers) {
@@ -697,7 +704,7 @@ void PlumedMain::backwardPropagate() {
   stopwatch.start("5 Applying (backward loop)");
 // apply them in reverse order
   for(auto pp=actionSet.rbegin(); pp!=actionSet.rend(); ++pp) {
-    const auto & p(*pp);
+    const auto & p(pp->get());
     if(p->isActive()) {
 
       std::string actionNumberLabel;
@@ -837,6 +844,10 @@ void PlumedMain::runJobsAtEndOfCalculation() {
     p->runFinalJobs();
   }
 }
+
+#ifdef __PLUMED_HAS_PYTHON
+// This is here to stop cppcheck throwing an error
+#endif
 
 }
 
