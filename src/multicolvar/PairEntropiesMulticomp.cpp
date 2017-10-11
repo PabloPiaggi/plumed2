@@ -24,6 +24,7 @@
 #include "tools/NeighborList.h"
 #include "core/ActionRegister.h"
 #include "tools/SwitchingFunction.h"
+#include "tools/Tools.h"
 
 #include <string>
 #include <cmath>
@@ -87,13 +88,17 @@ private:
   Tensor integrate(vector<Tensor> integrand, double delta)const;
   // Kernel to calculate g(r)
   double kernel(double distance, double&der)const;
+  bool doOutputGofr;
 public:
   static void registerKeywords( Keywords& keys );
   explicit PairEntropiesMulticomp(const ActionOptions&);
+  ~PairEntropiesMulticomp();
 // active methods:
   virtual double compute( const unsigned& tindex, AtomValuePack& myatoms ) const ; 
 /// Returns the number of coordinates of the field
   bool isPeriodic(){ return false; }
+  void outputGofr(int index, vector<double> gofrAA, vector<double> gofrAB, vector<double> gofrBB)const;
+  mutable OFile gofrOfile;
 };
 
 PLUMED_REGISTER_ACTION(PairEntropiesMulticomp,"PAIRENTROPIES_MULTICOMP")
@@ -111,6 +116,7 @@ void PairEntropiesMulticomp::registerKeywords( Keywords& keys ){
   keys.add("optional","DENSITYB","Density to normalize the g(r). If not specified, N/V is used");
   keys.add("optional","TEMPERATURE","Temperature in Kelvin. It is compulsory when keyword ONE_BODY is used");
   keys.add("optional","MASS","Mass in g/mol. It is compulsory when keyword ONE_BODY is used");
+  keys.addFlag("OUTPUT_GOFR",false,"Output g(r) of AA and AB pairs");
   keys.addFlag("LOCAL_DENSITY",false,"Use the local density to normalize g(r). If not specified, N/V is used");
   keys.addFlag("ONE_BODY",false,"Add the one body term (S1 = 5/2 - ln(dens*deBroglie^3) ) to the entropy");
   keys.addFlag("NO_TWO_BODY",false,"Remove the two-body term. Only the one-body term is kept. This flag can only be used along with the ONE_BODY flag.");
@@ -172,6 +178,8 @@ MultiColvarBase(ao)
      if (one_body) log.printf("The two-body entropy will be removed from the pair entropy. Only the one-body term is kept. \n");
      else error("NO_TWO_BODY keyword used but ONE_BODY not specified. ONE_BODY flag is compulsory with NO_TWO_BODY.");
   }
+
+  parseFlag("OUTPUT_GOFR",doOutputGofr);
   // And setup the ActionWithVessel
   std::vector<AtomNumber> all_atoms; setupMultiColvarBase( all_atoms ); checkRead();
   if (getNumberOfAtoms()!=(ga_lista.size() + gb_lista.size() )) error("Number of atoms in SPECIES is different from the sum of the number of atoms in GROUPA and GROUPB. ");
@@ -180,12 +188,14 @@ MultiColvarBase(ao)
      atomType[i]=0;
      for(unsigned j=0;j<ga_lista.size();++j){
         if (getAbsoluteIndex(i)==ga_lista[j]) atomType[i]=1;
-        else if (getAbsoluteIndex(i)==gb_lista[j]) atomType[i]=2;
+     }
+     for(unsigned j=0;j<gb_lista.size();++j){
+        if (getAbsoluteIndex(i)==gb_lista[j]) atomType[i]=2;
      }
      //log.printf("Reached atom %d index %d type %d \n", i, getAbsoluteIndex(i), atomType[i]);
      if (atomType[i]==0) error("At least one atom in SPECIES doesn't have a counterpart in GROUPA or GROUPB. ");
+     //log.printf("index %d, atomType %d \n", getAbsoluteIndex(i), atomType[i]);
   }
-  
 
   // Define heavily used constants
   double sqrt2piSigma = std::sqrt(2*pi)*sigma;
@@ -201,6 +211,12 @@ MultiColvarBase(ao)
   rcut2 = (maxr + 3*sigma)*(maxr + 3*sigma);
   rcut = std::sqrt(rcut2);
   log.printf("Setting cut off to %f \n ", maxr + 3*sigma );
+
+  gofrOfile.open("gofr-multi.txt");
+}
+
+PairEntropiesMulticomp::~PairEntropiesMulticomp() {
+  gofrOfile.close();
 }
 
 double PairEntropiesMulticomp::compute( const unsigned& tindex, AtomValuePack& myatoms ) const {
@@ -209,20 +225,23 @@ double PairEntropiesMulticomp::compute( const unsigned& tindex, AtomValuePack& m
    //vector<double> gofr(nhist);
    vector<double> gofrAA(nhist);
    vector<double> gofrAB(nhist);
+   vector<double> gofrBB(nhist);
    vector<double> logGofrAA(nhist);
    vector<double> logGofrAB(nhist);
+   vector<double> logGofrBB(nhist);
    //vector<double> logGofr(nhist);
    //Matrix<Vector> gofrPrime(nhist,getNumberOfAtoms());
    //vector<Vector> deriv(getNumberOfAtoms());
    //vector<Tensor> gofrVirial(nhist);
    Tensor virial;
    // Construct g(r)
-   int countNeighAA=0;
-   int countNeighAB=0;
+   int countNeighA=0;
+   int countNeighB=0;
    for(unsigned i=1;i<myatoms.getNumberOfAtoms();++i){
       Vector& distance=myatoms.getPosition(i);  
       if ( (d2=distance[0]*distance[0])<rcut2 && (d2+=distance[1]*distance[1])<rcut2 && (d2+=distance[2]*distance[2])<rcut2) {
          double distanceModulo=std::sqrt(d2);
+         if (distanceModulo<0.05) log.printf("distance %f \n", distanceModulo);
          Vector distance_versor = distance / distanceModulo;
          unsigned bin=std::floor(distanceModulo/deltar);
          int minBin, maxBin;
@@ -234,8 +253,11 @@ double PairEntropiesMulticomp::compute( const unsigned& tindex, AtomValuePack& m
          if (maxBin > (nhist-1)) maxBin=nhist-1;
          for(int j=minBin;j<maxBin+1;j+=1) {   
             double x=deltar*(j+0.5);
-            if  (atomType[myatoms.getIndex(0)]==atomType[myatoms.getIndex(i)]) {
+            //log.printf("index1 %d, index2 %d, atomType1 %d, atomType2 %d, centerBin %d, aroundBin %d \n", myatoms.getIndex(0), myatoms.getIndex(i), atomType[myatoms.getIndex(0)], atomType[myatoms.getIndex(i)], bin, j);
+            if  (atomType[myatoms.getIndex(0)]==1 && atomType[myatoms.getIndex(i)]==1) {
                gofrAA[j] += kernel(x-distanceModulo, dfunc);
+            } else if  (atomType[myatoms.getIndex(0)]==2 && atomType[myatoms.getIndex(i)]==2) {
+               gofrBB[j] += kernel(x-distanceModulo, dfunc);
             } else {
                gofrAB[j] += kernel(x-distanceModulo, dfunc);
             }
@@ -249,10 +271,10 @@ double PairEntropiesMulticomp::compute( const unsigned& tindex, AtomValuePack& m
             }
             */
 	 } 
-         if (atomType[myatoms.getIndex(0)]==atomType[myatoms.getIndex(i)]) {
-            countNeighAA += 1;
+         if (atomType[myatoms.getIndex(0)]==1) {
+            countNeighA += 1;
          } else {
-            countNeighAB += 1;
+            countNeighA += 1;
          }
       }
    }
@@ -261,27 +283,16 @@ double PairEntropiesMulticomp::compute( const unsigned& tindex, AtomValuePack& m
    double density, densityA, densityB;
    if (density_given>0) {
       density=density_given;
-      if (atomType[myatoms.getIndex(0)]==1) {
-         densityA=density_givenA;
-         densityB=density_givenB;
-      }
-      else if (atomType[myatoms.getIndex(0)]==2) {
-         densityA=density_givenB;
-         densityB=density_givenA;
-      }
+      densityA=density_givenA;
+      densityB=density_givenB;
    } else if (local_density) {
-      density= (double) (countNeighAA+countNeighAB) / ( (4./3.)*pi*rcut*rcut*rcut);
-      densityA= (double) countNeighAA / ( (4./3.)*pi*rcut*rcut*rcut);
-      densityB= (double) countNeighAB / ( (4./3.)*pi*rcut*rcut*rcut);
+      density= (double) (countNeighA+countNeighB) / ( (4./3.)*pi*rcut*rcut*rcut);
+      densityA= (double) countNeighA / ( (4./3.)*pi*rcut*rcut*rcut);
+      densityB= (double) countNeighB / ( (4./3.)*pi*rcut*rcut*rcut);
    } else {
       density=getNumberOfAtoms()/volume; // This is (NA+NB)/V
-      if (atomType[myatoms.getIndex(0)]==1) {
-         densityA=numberOfAatoms/volume; // This is NA/V
-         densityB=numberOfBatoms/volume; // This is NB/V
-      } else if (atomType[myatoms.getIndex(0)]==2) {
-         densityA=numberOfBatoms/volume; // This is NA/V
-         densityB=numberOfAatoms/volume; // This is NB/V
-      }
+      densityA=numberOfAatoms/volume; // This is NA/V
+      densityB=numberOfBatoms/volume; // This is NB/V
    }
    //log.printf("rcut %f \n", rcut);
    //log.printf("countNeigh %d \n", countNeigh);
@@ -289,8 +300,18 @@ double PairEntropiesMulticomp::compute( const unsigned& tindex, AtomValuePack& m
    for(unsigned i=0;i<nhist;++i){
      double x=deltar*(i+0.5);
      double normConstantAA = 4*pi*densityA*x*x;
-     double normConstantAB = 4*pi*densityB*x*x;
-     gofrAA[i] /= normConstantAA;
+     double normConstantBB = 4*pi*densityB*x*x;
+     double normConstantAB;
+     if (atomType[myatoms.getIndex(0)]==1) {
+        normConstantAB = 4*pi*densityB*x*x;
+     } else {
+        normConstantAB = 4*pi*densityA*x*x;
+     }
+     if (atomType[myatoms.getIndex(0)]==1) {
+        gofrAA[i] /= normConstantAA;
+     } else {
+        gofrBB[i] /= normConstantBB;
+     }
      gofrAB[i] /= normConstantAB;
      /*
      if (!doNotCalculateDerivatives()) {
@@ -301,16 +322,26 @@ double PairEntropiesMulticomp::compute( const unsigned& tindex, AtomValuePack& m
      }
      */
    }
+   if (doOutputGofr) outputGofr(myatoms.getIndex(0)+1,gofrAA,gofrAB,gofrBB);
    // Construct integrand
-   vector<double> integrandAA(nhist), integrandAB(nhist);
+   vector<double> integrandAA(nhist), integrandAB(nhist), integrandBB(nhist);
    for(unsigned i=0;i<nhist;++i){
      double x=deltar*(i+0.5);
-     logGofrAA[i] = std::log(gofrAA[i]);
      logGofrAB[i] = std::log(gofrAB[i]);
-     if (gofrAA[i]<1.e-10) {
-       integrandAA[i] = x*x;
+     if (atomType[myatoms.getIndex(0)]==1) {
+        logGofrAA[i] = std::log(gofrAA[i]);
+        if (gofrAA[i]<1.e-10) {
+           integrandAA[i] = x*x;
+        } else {
+           integrandAA[i] = (gofrAA[i]*logGofrAA[i]-gofrAA[i]+1)*x*x;
+        }
      } else {
-       integrandAA[i] = (gofrAA[i]*logGofrAA[i]-gofrAA[i]+1)*x*x;
+        logGofrBB[i] = std::log(gofrBB[i]);
+        if (gofrBB[i]<1.e-10) {
+           integrandBB[i] = x*x;
+        } else {
+           integrandBB[i] = (gofrBB[i]*logGofrBB[i]-gofrBB[i]+1)*x*x;
+        }
      }
      if (gofrAB[i]<1.e-10) {
        integrandAB[i] = x*x;
@@ -320,15 +351,28 @@ double PairEntropiesMulticomp::compute( const unsigned& tindex, AtomValuePack& m
    }
    // Integrate to obtain pair entropy;
    double entropy=0.;
-   double prefactorAA = -2*pi*(densityA*densityA/density);
-   double prefactorAB = -4*pi*(densityA*densityB/density);
-   double pairAAvalue =  prefactorAA*integrate(integrandAA,deltar);
-   double pairABvalue = prefactorAB*integrate(integrandAB,deltar);
+   double prefactorAA;
+   double prefactorBB;
+   double prefactorAB;
+   double pairAAvalue=0.;
+   double pairABvalue=0.;
+   double pairBBvalue=0.;
+   if (atomType[myatoms.getIndex(0)]==1) {
+      prefactorAA = -2*pi*(densityA*densityA/density);
+      pairAAvalue =  prefactorAA*integrate(integrandAA,deltar);
+   } else {
+      prefactorBB = -2*pi*(densityB*densityB/density);
+      pairBBvalue = prefactorBB*integrate(integrandBB,deltar);
+   }
+   prefactorAB = -4*pi*(densityA*densityB/density);
+   pairABvalue = prefactorAB*integrate(integrandAB,deltar);
    if (!no_two_body) {
-      entropy += pairAAvalue+pairABvalue; 
+      entropy += pairAAvalue+pairBBvalue+pairABvalue;
    }
    if (one_body) {
-      entropy += 5./2. - std::log(densityA*deBroglie3) - std::log(densityB*deBroglie3);
+      entropy += 5./2.;
+      if (densityA>0.) entropy -= std::log(densityA*deBroglie3);
+      if (densityB>0.) entropy -= std::log(densityB*deBroglie3);
    }
    /*
    if (!doNotCalculateDerivatives()) {
@@ -414,6 +458,14 @@ Tensor PairEntropiesMulticomp::integrate(vector<Tensor> integrand, double delta)
   result += 0.5*integrand[integrand.size()-1];
   result *= delta;
   return result;
+}
+
+void PairEntropiesMulticomp::outputGofr(int index, vector<double> gofrAA, vector<double> gofrAB, vector<double> gofrBB)const{
+  gofrOfile.printf("# Atom index %d \n",index);
+  for(unsigned i=0;i<gofrAA.size();++i){
+     double r=deltar*(i+0.5);
+     gofrOfile.printField("r",r).printField("gofrAA",gofrAA[i]).printField("gofrAB",gofrAB[i]).printField("gofrBB",gofrBB[i]).printField();
+  }
 }
 
 
