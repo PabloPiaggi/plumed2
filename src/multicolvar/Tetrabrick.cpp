@@ -308,6 +308,7 @@ double Tetrabrick::compute( const unsigned& tindex, AtomValuePack& myatoms ) con
 */
 
    // output quantities
+   if (tetra<1.e-10) tetra=1.e-10;
    tetra = 1 - 3./8.*tetra;
    if (entropyFlag) tetra = (3./2.)*std::log(1-tetra);
 
