@@ -116,7 +116,7 @@ void PairEntropiesMulticomp::registerKeywords( Keywords& keys ){
   keys.add("optional","DENSITYB","Density to normalize the g(r). If not specified, N/V is used");
   keys.add("optional","TEMPERATURE","Temperature in Kelvin. It is compulsory when keyword ONE_BODY is used");
   keys.add("optional","MASS","Mass in g/mol. It is compulsory when keyword ONE_BODY is used");
-  keys.addFlag("OUTPUT_GOFR",false,"Output g(r) of AA and AB pairs");
+  keys.addFlag("OUTPUT_GOFR",false,"Output g(r) of AA, AB and BB pairs");
   keys.addFlag("LOCAL_DENSITY",false,"Use the local density to normalize g(r). If not specified, N/V is used");
   keys.addFlag("ONE_BODY",false,"Add the one body term (S1 = 5/2 - ln(dens*deBroglie^3) ) to the entropy");
   keys.addFlag("NO_TWO_BODY",false,"Remove the two-body term. Only the one-body term is kept. This flag can only be used along with the ONE_BODY flag.");
