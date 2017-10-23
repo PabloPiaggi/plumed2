@@ -63,7 +63,7 @@ private:
 //  double nl_cut;
   double rcut2;
   SwitchingFunction switchingFunction; 
-  bool entropyFlag;
+  bool entropyFlag, normalizeFlag;
 public:
   static void registerKeywords( Keywords& keys );
   explicit Tetrabrick(const ActionOptions&);
@@ -86,6 +86,7 @@ void Tetrabrick::registerKeywords( Keywords& keys ){
                                "The following provides information on the \\ref switchingfunction that are available. "
                                "When this keyword is present you no longer need the NN, MM, D_0 and R_0 keywords.");
   keys.addFlag("ENTROPY",false,"Calculate the tetrahedral entropy instead of the entropy order parameter.");
+  keys.addFlag("NORMALIZE_NUM_NEIGH",false,"Normalize the order parameter with the number of neighbors.");
   // Use actionWithDistributionKeywords
   keys.use("MEAN"); keys.use("MORE_THAN"); keys.use("LESS_THAN"); keys.use("MAX");
   keys.use("MIN"); keys.use("BETWEEN"); keys.use("HISTOGRAM"); keys.use("MOMENTS");
@@ -116,6 +117,9 @@ MultiColvarBase(ao)
   parseFlag("ENTROPY",entropyFlag);
   if (entropyFlag) log.printf("The tetrahedral entropy will be calculated instead of the tetrahedral order paramater. Derivatives are not available. \n");
 
+  parseFlag("NORMALIZE_NUM_NEIGH",normalizeFlag);
+  if (normalizeFlag) log.printf("The tetrahedral parameter will be normalized by the number of neighbors. \n");
+
   // And setup the ActionWithVessel
   std::vector<AtomNumber> all_atoms; setupMultiColvarBase( all_atoms ); checkRead();
 }
@@ -138,6 +142,7 @@ double Tetrabrick::compute( const unsigned& tindex, AtomValuePack& myatoms ) con
    Vector der_i, der_j;							//derivatives i and j
 
    // Loop on nearest neighbors and load distances di and dj
+	double numNeigh;
 
    for(unsigned i=1;i<(myatoms.getNumberOfAtoms()-1);++i){
       Vector& di=myatoms.getPosition(i); 		//relative position of atom i (with respect to k)
@@ -165,6 +170,7 @@ double Tetrabrick::compute( const unsigned& tindex, AtomValuePack& myatoms ) con
 			sw_j = switchingFunction.calculateSqr( d2j, df_j );
 			// order parameter (relative to ikj triplet)
             tetra += cos2*sw_i*sw_j;
+			numNeigh += sw_i*sw_j;
 
 			// -- (2) DERIVATE --
 			// useful terms
@@ -309,6 +315,7 @@ double Tetrabrick::compute( const unsigned& tindex, AtomValuePack& myatoms ) con
 
    // output quantities
    if (tetra<1.e-10) tetra=1.e-10;
+	tetra /= numNeigh;
    tetra = 1 - 3./8.*tetra;
    if (entropyFlag) tetra = (3./2.)*std::log(1-tetra);
 
