@@ -89,7 +89,6 @@ private:
   // Output of g(r)
   bool doOutputGofr;
   void outputGofr(int index, vector<double> gofr)const;
-  unsigned rank;
   unsigned outputStride;
   // Average g(r)
   mutable Matrix<double> avgGofr;
@@ -167,8 +166,7 @@ MultiColvarBase(ao)
      if (one_body) log.printf("The two-body entropy will be removed from the pair entropy. Only the one-body term is kept. \n");
      else error("NO_TWO_BODY keyword used but ONE_BODY not specified. ONE_BODY flag is compulsory with NO_TWO_BODY.");
   }
-  rank=comm.Get_rank(); 
-  if (rank==0) parseFlag("OUTPUT_GOFR",doOutputGofr);
+  parseFlag("OUTPUT_GOFR",doOutputGofr);
   if (doOutputGofr) log.printf("The g(r) of each atom will be written to a file. \n");
   outputStride=1;
   parse("OUTPUT_STRIDE",outputStride);
@@ -200,7 +198,6 @@ MultiColvarBase(ao)
   log.printf("Setting cut off to %f \n ", maxr + 3*sigma );
 
   if (doOutputGofr) gofrOfile.open("gofr-multi.txt");
-
 }
 
 PairEntropies::~PairEntropies() {
