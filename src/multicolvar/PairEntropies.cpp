@@ -168,8 +168,10 @@ MultiColvarBase(ao)
   }
   parseFlag("OUTPUT_GOFR",doOutputGofr);
   if (doOutputGofr) log.printf("The g(r) of each atom will be written to a file. \n");
+  if (doOutputGofr && comm.Get_size()!=1) error("OUTPUT_GOFR cannot be used with more than one MPI thread");
   outputStride=1;
   parse("OUTPUT_STRIDE",outputStride);
+  if (!doOutputGofr && outputStride!=1) error("OUTPUT_STRIDE specified but OUTPUT_GOFR not given. Specify OUTPUT_GOFR ore remove OUTPUT_STRIDE"); 
 
   // And setup the ActionWithVessel
   std::vector<AtomNumber> all_atoms; setupMultiColvarBase( all_atoms ); 
