@@ -77,9 +77,11 @@ private:
   unsigned nhist;
   double density_given;
   bool local_density, one_body, no_two_body, doAverageGofr;
+  unsigned averageGofrTau;
   double deltar;
   unsigned deltaBin;
   double temperature, mass, deBroglie3;
+  std::vector<double> vectorX, vectorX2;
   // Integration routine
   double integrate(vector<double> integrand, double delta)const;
   Vector integrate(vector<Vector> integrand, double delta)const;
@@ -88,10 +90,11 @@ private:
   double kernel(double distance, double&der)const;
   // Output of g(r)
   bool doOutputGofr;
-  void outputGofr(int index, vector<double> gofr)const;
+  void outputGofr(int index, int nat, int step, int stride, vector<double> gofr)const;
   unsigned outputStride;
   // Average g(r)
   mutable Matrix<double> avgGofr;
+  mutable double avgDensity;
   mutable vector<unsigned> iteration;
 public:
   static void registerKeywords( Keywords& keys );
@@ -121,6 +124,7 @@ void PairEntropies::registerKeywords( Keywords& keys ){
   keys.addFlag("OUTPUT_GOFR",false,"Output g(r) to file.");
   keys.add("optional","OUTPUT_STRIDE","The frequency with which the output is written to files");
   keys.addFlag("AVERAGE_GOFR",false,"Average g(r) over time.");
+  keys.add("optional","AVERAGE_GOFR_TAU","Characteristic length of a window in which to average the g(r). It is in units of iterations and should be an integer. Zero corresponds to an normal average (infinite window).");
   // Use actionWithDistributionKeywords
   keys.use("MEAN"); keys.use("MORE_THAN"); keys.use("LESS_THAN"); keys.use("MAX");
   keys.use("MIN"); keys.use("BETWEEN"); keys.use("HISTOGRAM"); keys.use("MOMENTS");
@@ -171,17 +175,26 @@ MultiColvarBase(ao)
   if (doOutputGofr && comm.Get_size()!=1) error("OUTPUT_GOFR cannot be used with more than one MPI thread");
   outputStride=1;
   parse("OUTPUT_STRIDE",outputStride);
-  if (!doOutputGofr && outputStride!=1) error("OUTPUT_STRIDE specified but OUTPUT_GOFR not given. Specify OUTPUT_GOFR ore remove OUTPUT_STRIDE"); 
+  if (!doOutputGofr && outputStride!=1) error("OUTPUT_STRIDE specified but OUTPUT_GOFR not given. Specify OUTPUT_GOFR or remove OUTPUT_STRIDE"); 
+  if (doOutputGofr) log.printf("The output stride to write g(r) or the integrand is %d \n", outputStride);
 
   // And setup the ActionWithVessel
   std::vector<AtomNumber> all_atoms; setupMultiColvarBase( all_atoms ); 
 
   // Allocate space for the average g(r)
+  doAverageGofr=false;
   parseFlag("AVERAGE_GOFR",doAverageGofr);
   if (doAverageGofr) {
     avgGofr.resize(getFullNumberOfTasks(),nhist);
     iteration.resize(getFullNumberOfTasks());
+    avgDensity=0.;
   }
+  averageGofrTau=0;
+  parse("AVERAGE_GOFR_TAU",averageGofrTau);
+  if (averageGofrTau!=0 && !doAverageGofr) error("AVERAGE_GOFR_TAU specified but AVERAGE_GOFR not given. Specify AVERAGE_GOFR or remove AVERAGE_GOFR_TAU");
+  if (doAverageGofr && averageGofrTau==0) log.printf("The g(r) will be averaged over all frames \n");
+  if (doAverageGofr && averageGofrTau!=0) log.printf("The g(r) will be averaged with a window of %d steps \n", averageGofrTau);
+
 
   checkRead();
   // Define heavily used constants
@@ -192,6 +205,12 @@ MultiColvarBase(ao)
   deltar=maxr/(nhist-1);
   if(deltar>sigma) error("Bin size too large! Increase NHIST");
   deltaBin = std::floor(4*sigma/deltar); //4*sigma
+  vectorX.resize(nhist);
+  vectorX2.resize(nhist);
+  for(unsigned i=0;i<nhist;++i){
+    vectorX[i]=deltar*i;
+    vectorX2[i]=vectorX[i]*vectorX[i];
+  }
 
   // Set the link cell cutoff
   setLinkCellCutoff( maxr + 3*sigma );
@@ -232,8 +251,7 @@ double PairEntropies::compute( const unsigned& tindex, AtomValuePack& myatoms ) 
            maxBin=bin +  deltaBin;
            if (maxBin > (nhist-1)) maxBin=nhist-1;
            for(int j=minBin;j<maxBin+1;j+=1) {   
-             double x=deltar*j;
-             gofr[j] += kernel(x-distanceModulo, dfunc);
+             gofr[j] += kernel(vectorX[j]-distanceModulo, dfunc);
              if (!doNotCalculateDerivatives()) {
                value = dfunc * distance_versor;
                gofrPrime[j][0] += value;
@@ -254,9 +272,10 @@ double PairEntropies::compute( const unsigned& tindex, AtomValuePack& myatoms ) 
    //log.printf("rcut %f \n", rcut);
    //log.printf("countNeigh %d \n", countNeigh);
    //log.printf("density %f \n", density);
+   double TwoPiDensity = 2*pi*density;
+   double normConstantBase = 2*TwoPiDensity;
    for(unsigned i=1;i<nhist;++i){
-     double x=deltar*i;
-     double normConstant = 4*pi*density*x*x;
+     double normConstant = normConstantBase*vectorX2[i];
      gofr[i] /= normConstant;
      if (!doNotCalculateDerivatives()) {
        gofrVirial[i] /= normConstant;
@@ -266,28 +285,33 @@ double PairEntropies::compute( const unsigned& tindex, AtomValuePack& myatoms ) 
      }
    }
    if (doAverageGofr) {
-      iteration[myatoms.getIndex(0)] += 1;
+      double factor;
+      if (averageGofrTau==0 || (iteration[myatoms.getIndex(0)] < averageGofrTau) ) {
+         iteration[myatoms.getIndex(0)] += 1;
+         factor = 1./( (double) iteration[myatoms.getIndex(0)] );
+      } else factor = 2./((double) averageGofrTau + 1.);
       for(unsigned i=0;i<nhist;++i){
-         avgGofr[myatoms.getIndex(0)][i] += (gofr[i]-avgGofr[myatoms.getIndex(0)][i])/( (double) iteration[myatoms.getIndex(0)] );
+         avgGofr[myatoms.getIndex(0)][i] += (gofr[i]-avgGofr[myatoms.getIndex(0)][i])*factor;
          gofr[i] = avgGofr[myatoms.getIndex(0)][i];
+         avgDensity += (density-avgDensity)*factor;
+         density = avgDensity;
       }
    }
-   if (doOutputGofr && (getStep()%outputStride==0)) outputGofr(myatoms.getIndex(0)+1,gofr);
+   if (doOutputGofr && (getStep()%outputStride==0)) outputGofr(myatoms.getIndex(0)+1,getFullNumberOfTasks(),getStep(),outputStride,gofr);
    // Construct integrand
    vector<double> integrand(nhist);
    for(unsigned i=0;i<nhist;++i){
-     double x=deltar*i;
      logGofr[i] = std::log(gofr[i]);
      if (gofr[i]<1.e-10) {
-       integrand[i] = x*x;
+       integrand[i] = vectorX2[i];
      } else {
-       integrand[i] = (gofr[i]*logGofr[i]-gofr[i]+1)*x*x;
+       integrand[i] = (gofr[i]*logGofr[i]-gofr[i]+1)*vectorX2[i];
      }
    }
    // Integrate to obtain pair entropy;
    double entropy=0.;
    if (!no_two_body) {
-      entropy += -2*pi*density*integrate(integrand,deltar); 
+      entropy += -TwoPiDensity*integrate(integrand,deltar); 
    }
    if (one_body) {
       entropy += 5./2. - std::log(density*deBroglie3);
@@ -297,34 +321,31 @@ double PairEntropies::compute( const unsigned& tindex, AtomValuePack& myatoms ) 
      for(unsigned i=0;i<myatoms.getNumberOfAtoms();++i) {
        vector<Vector> integrandDerivatives(nhist);
        for(unsigned j=0;j<nhist;++j){
-         double x=deltar*j;
          if (gofr[j]>1.e-10) {
-           integrandDerivatives[j] = gofrPrime[j][i]*logGofr[j]*x*x;
+           integrandDerivatives[j] = gofrPrime[j][i]*logGofr[j]*vectorX2[j];
          }
        }
        // Integrate
-       deriv[i] = -2*pi*density*integrate(integrandDerivatives,deltar);
+       deriv[i] = -TwoPiDensity*integrate(integrandDerivatives,deltar);
      }
      // Virial of positions
      // Construct virial integrand
      vector<Tensor> integrandVirial(nhist);
      for(unsigned i=0;i<nhist;++i){
-       double x=deltar*i;
        if (gofr[i]>1.e-10) {
-         integrandVirial[i] = gofrVirial[i]*logGofr[i]*x*x;
+         integrandVirial[i] = gofrVirial[i]*logGofr[i]*vectorX2[i];
        }
      }
      // Integrate virial
-     virial = -2*pi*density*integrate(integrandVirial,deltar);
+     virial = -TwoPiDensity*integrate(integrandVirial,deltar);
      // Virial of volume
      // Construct virial integrand
      vector<double> integrandVirialVolume(nhist);
      for(unsigned i=0;i<nhist;i+=1) {   
-       double x=deltar*i;
-       integrandVirialVolume[i] = (-gofr[i]+1)*x*x;
+       integrandVirialVolume[i] = (-gofr[i]+1)*vectorX2[i];
      }
      // Integrate virial
-     virial += -2*pi*density*integrate(integrandVirialVolume,deltar)*Tensor::identity();
+     virial += -TwoPiDensity*integrate(integrandVirialVolume,deltar)*Tensor::identity();
    }
    // Assign derivatives
    for(unsigned i=0;i<myatoms.getNumberOfAtoms();++i) addAtomDerivatives( 1, i, deriv[i], myatoms );
@@ -376,12 +397,13 @@ Tensor PairEntropies::integrate(vector<Tensor> integrand, double delta)const{
   return result;
 }
 
-void PairEntropies::outputGofr(int index, vector<double> gofr)const{
-  gofrOfile.printf("# Atom index %d \n",index);
+void PairEntropies::outputGofr(int index, int nat, int step, int stride, vector<double> gofr)const{
+  gofrOfile.printf("# Atom index %d Step number %d Function number %d \n",index,step,((step/stride)*nat)+index-1);
   for(unsigned i=0;i<gofr.size();++i){
-     double r=deltar*i;
-     gofrOfile.printField("r",r).printField("gofr",gofr[i]).printField();
+     gofrOfile.printField("r",vectorX[i]).printField("gofr",gofr[i]).printField();
   }
+  gofrOfile.printf(" \n");
+  gofrOfile.printf(" \n");
 }
 
 
