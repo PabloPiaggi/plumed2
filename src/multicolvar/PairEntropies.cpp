@@ -96,6 +96,8 @@ private:
   mutable Matrix<double> avgGofr;
   mutable double avgDensity;
   mutable vector<unsigned> iteration;
+  // Cut at first peak
+  bool doCutAtFirstPeak;
 public:
   static void registerKeywords( Keywords& keys );
   explicit PairEntropies(const ActionOptions&);
@@ -122,6 +124,7 @@ void PairEntropies::registerKeywords( Keywords& keys ){
   keys.addFlag("ONE_BODY",false,"Add the one body term (S1 = 5/2 - ln(dens*deBroglie^3) ) to the entropy");
   keys.addFlag("NO_TWO_BODY",false,"Remove the two-body term. Only the one-body term is kept. This flag can only be used along with the ONE_BODY flag.");
   keys.addFlag("OUTPUT_GOFR",false,"Output g(r) to file.");
+  keys.addFlag("CUT_AT_FIRST_PEAK",false,"Let the g(r) go to one after the first peak.");
   keys.add("optional","OUTPUT_STRIDE","The frequency with which the output is written to files");
   keys.addFlag("AVERAGE_GOFR",false,"Average g(r) over time.");
   keys.add("optional","AVERAGE_GOFR_TAU","Characteristic length of a window in which to average the g(r). It is in units of iterations and should be an integer. Zero corresponds to an normal average (infinite window).");
@@ -195,6 +198,8 @@ MultiColvarBase(ao)
   if (doAverageGofr && averageGofrTau==0) log.printf("The g(r) will be averaged over all frames \n");
   if (doAverageGofr && averageGofrTau!=0) log.printf("The g(r) will be averaged with a window of %d steps \n", averageGofrTau);
 
+  doCutAtFirstPeak=false;
+  parseFlag("CUT_AT_FIRST_PEAK",doCutAtFirstPeak);
 
   checkRead();
   // Define heavily used constants
@@ -276,7 +281,8 @@ double PairEntropies::compute( const unsigned& tindex, AtomValuePack& myatoms ) 
    double normConstantBase = 2*TwoPiDensity;
    for(unsigned i=1;i<nhist;++i){
      double normConstant = normConstantBase*vectorX2[i];
-     gofr[i] /= normConstant;
+     if (density<1.e-20) gofr[i] = 1.;
+     else gofr[i] /= normConstant;
      if (!doNotCalculateDerivatives()) {
        gofrVirial[i] /= normConstant;
        for(unsigned j=0;j<myatoms.getNumberOfAtoms();++j){
@@ -284,7 +290,21 @@ double PairEntropies::compute( const unsigned& tindex, AtomValuePack& myatoms ) 
        }
      }
    }
+   if (doCutAtFirstPeak) {
+      if (!doNotCalculateDerivatives()) error("Cannot calculate derivatives or bias using the CUT_AT_FIRST_PEAK option");
+      int posFirstPeak=nhist;
+      for(unsigned i=0;i<nhist;++i){
+         if (gofr[i]>1.) {
+            posFirstPeak=i;
+            break;
+         }
+      }
+      for(unsigned i=posFirstPeak;i<nhist;++i){
+         gofr[i] = 1.;
+      }
+   }
    if (doAverageGofr) {
+      if (!doNotCalculateDerivatives()) error("Cannot calculate derivatives or bias using the AVERAGE_GOFR option");
       double factor;
       if (averageGofrTau==0 || (iteration[myatoms.getIndex(0)] < averageGofrTau) ) {
          iteration[myatoms.getIndex(0)] += 1;
