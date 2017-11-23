@@ -98,6 +98,7 @@ private:
   mutable vector<unsigned> iteration;
   // Cut at first peak
   bool doCutAtFirstPeak;
+  double cutAtFirstPeakValue;
 public:
   static void registerKeywords( Keywords& keys );
   explicit PairEntropies(const ActionOptions&);
@@ -124,7 +125,8 @@ void PairEntropies::registerKeywords( Keywords& keys ){
   keys.addFlag("ONE_BODY",false,"Add the one body term (S1 = 5/2 - ln(dens*deBroglie^3) ) to the entropy");
   keys.addFlag("NO_TWO_BODY",false,"Remove the two-body term. Only the one-body term is kept. This flag can only be used along with the ONE_BODY flag.");
   keys.addFlag("OUTPUT_GOFR",false,"Output g(r) to file.");
-  keys.addFlag("CUT_AT_FIRST_PEAK",false,"Let the g(r) go to one after the first peak.");
+  keys.addFlag("CUT_AT_FIRST_PEAK",false,"Let the g(r) go to one after the first peak. If CUT_AT_FIRST_PEAK_VALUE is given, then the first peak is considered to be located at the first point in which the g(r) attains the given value. If CUT_AT_FIRST_PEAK_VALUE is not given, the position of the first peak is determined as the first zero of the second derivative of g(r).");
+  keys.add("optional","CUT_AT_FIRST_PEAK_VALUE","Value of g(r) after which g(r) will be 1. It is optional when the keyword CUT_AT_FIRST_PEAK is used");
   keys.add("optional","OUTPUT_STRIDE","The frequency with which the output is written to files");
   keys.addFlag("AVERAGE_GOFR",false,"Average g(r) over time.");
   keys.add("optional","AVERAGE_GOFR_TAU","Characteristic length of a window in which to average the g(r). It is in units of iterations and should be an integer. Zero corresponds to an normal average (infinite window).");
@@ -199,7 +201,15 @@ MultiColvarBase(ao)
   if (doAverageGofr && averageGofrTau!=0) log.printf("The g(r) will be averaged with a window of %d steps \n", averageGofrTau);
 
   doCutAtFirstPeak=false;
+  cutAtFirstPeakValue=-1.;
   parseFlag("CUT_AT_FIRST_PEAK",doCutAtFirstPeak);
+  parse("CUT_AT_FIRST_PEAK_VALUE",cutAtFirstPeakValue);
+  if (!doCutAtFirstPeak && cutAtFirstPeakValue>0.) error("CUT_AT_FIRST_PEAK_VALUE cannot be used if CUT_AT_FIRST_PEAK has not been specified");
+  if (doCutAtFirstPeak) {
+    log.printf("   The g(r) will be set to 1 after the first peak \n");
+    if (cutAtFirstPeakValue<0.) log.printf("   The first peak is determined as the first root of the second derivative \n");
+    else log.printf("   The first peak is determined as the position where g(r) is equal to %f \n", cutAtFirstPeakValue);
+  }
 
   checkRead();
   // Define heavily used constants
@@ -292,16 +302,25 @@ double PairEntropies::compute( const unsigned& tindex, AtomValuePack& myatoms ) 
    }
    if (doCutAtFirstPeak) {
       if (!doNotCalculateDerivatives()) error("Cannot calculate derivatives or bias using the CUT_AT_FIRST_PEAK option");
-      // Check when second derivative changes sign 
       int posFirstPeak=nhist;
-      double secondDerPrev=(gofr[2]-2*gofr[1]+gofr[0])/(deltar*deltar);
-      for(unsigned i=2;i<(nhist-1);++i){
-         double secondDer=(gofr[i+1]-2*gofr[i]+gofr[i-1])/(deltar*deltar);
-         if (secondDer*secondDerPrev<0.) {
-            posFirstPeak=i;
-            break;
+      if (cutAtFirstPeakValue<0.) {
+         // Check when second derivative changes sign 
+         double secondDerPrev=(gofr[2]-2*gofr[1]+gofr[0])/(deltar*deltar);
+         for(unsigned i=2;i<(nhist-1);++i){
+            double secondDer=(gofr[i+1]-2*gofr[i]+gofr[i-1])/(deltar*deltar);
+            if (secondDer*secondDerPrev<0.) {
+               posFirstPeak=i;
+               break;
+            }
+            secondDerPrev=secondDer;
          }
-         secondDerPrev=secondDer;
+      } else {
+         for(unsigned i=0;i<nhist;++i){
+            if(gofr[i]>cutAtFirstPeakValue) {
+               posFirstPeak=i;
+               break;
+            }
+         }
       }
       for(unsigned i=posFirstPeak;i<nhist;++i){
          gofr[i] = 1.;
