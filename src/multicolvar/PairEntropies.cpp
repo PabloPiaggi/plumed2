@@ -292,12 +292,16 @@ double PairEntropies::compute( const unsigned& tindex, AtomValuePack& myatoms ) 
    }
    if (doCutAtFirstPeak) {
       if (!doNotCalculateDerivatives()) error("Cannot calculate derivatives or bias using the CUT_AT_FIRST_PEAK option");
+      // Check when second derivative changes sign 
       int posFirstPeak=nhist;
-      for(unsigned i=0;i<nhist;++i){
-         if (gofr[i]>1.) {
+      double secondDerPrev=(gofr[2]-2*gofr[1]+gofr[0])/(deltar*deltar);
+      for(unsigned i=2;i<(nhist-1);++i){
+         double secondDer=(gofr[i+1]-2*gofr[i]+gofr[i-1])/(deltar*deltar);
+         if (secondDer*secondDerPrev<0.) {
             posFirstPeak=i;
             break;
          }
+         secondDerPrev=secondDer;
       }
       for(unsigned i=posFirstPeak;i<nhist;++i){
          gofr[i] = 1.;
