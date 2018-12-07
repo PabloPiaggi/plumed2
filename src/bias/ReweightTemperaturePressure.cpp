@@ -60,40 +60,51 @@ DUMPGRID GRID=hB FILE=histoB
 namespace PLMD {
 namespace bias {
 
-class ReweightTemperature : public ReweightBase {
+class ReweightTemperaturePressure : public ReweightBase {
 private:
 ///
-  double rtemp;
+  double rpress_, press_, rtemp_;
 /// The biases we are using in reweighting and the args we store them separately
   std::vector<Value*> biases;
 public:
   static void registerKeywords(Keywords&);
-  explicit ReweightTemperature(const ActionOptions&ao);
+  explicit ReweightTemperaturePressure(const ActionOptions&ao);
   double getLogWeight();
 };
 
-PLUMED_REGISTER_ACTION(ReweightTemperature,"REWEIGHT_TEMP")
+PLUMED_REGISTER_ACTION(ReweightTemperaturePressure,"REWEIGHT_TEMPERATURE_PRESSURE")
 
-void ReweightTemperature::registerKeywords(Keywords& keys ) {
+void ReweightTemperaturePressure::registerKeywords(Keywords& keys ) {
   ReweightBase::registerKeywords( keys );
-  keys.add("compulsory","REWEIGHT_TEMP","reweight data from a trajectory at one temperature and output the probability "
+  keys.add("compulsory","REWEIGHT_PRESSURE","reweight data from a trajectory at one pressure and output the probability "
            "distribution at a second temperature. This is not possible during postprocessing.");
-  keys.remove("ARG"); keys.add("compulsory","ARG","*.bias","the biases or energies that must be taken into account when reweighting");
+  keys.add("compulsory","PRESSURE","Pressure of the trajectory");
+  //keys.add("compulsory","DOF","Degrees of freedom of the kinetic energy");
+  keys.add("compulsory","REWEIGHT_TEMP","reweight data from a trajectory at one temperature and output the probability ");
+  keys.remove("ARG"); keys.add("compulsory","ARG","energy,volume");
 }
 
-ReweightTemperature::ReweightTemperature(const ActionOptions&ao):
+ReweightTemperaturePressure::ReweightTemperaturePressure(const ActionOptions&ao):
   Action(ao),
   ReweightBase(ao)
 {
-  parse("REWEIGHT_TEMP",rtemp);
-  log.printf("  reweighting simulation to probabilities at temperature %f\n",rtemp);
-  rtemp*=plumed.getAtoms().getKBoltzmann();
+  parse("REWEIGHT_PRESSURE",rpress_);
+  parse("PRESSURE",press_);
+  parse("REWEIGHT_TEMP",rtemp_);
+  //parse("DOF",dof_);
+  log.printf("  reweighting simulation to probabilities at temperature %f\n",rtemp_);
+  rtemp_*=plumed.getAtoms().getKBoltzmann();
+  //rtemp*=plumed.getAtoms().getKBoltzmann();
+  if(getNumberOfArguments()!=2) error(" Number of arguments should be 2. The energy and the volume, in that order.");
 }
 
-double ReweightTemperature::getLogWeight() {
-  // Retrieve the bias
-  double bias=0.0; for(unsigned i=0; i<getNumberOfArguments(); ++i) bias+=getArgument(i);
-  return -( (1.0/rtemp) - (1.0/simtemp) )*bias;
+double ReweightTemperaturePressure::getLogWeight() {
+  double energy=getArgument(0);
+  double volume=getArgument(1);
+  //double deltaPressure=dof_*(rtemp_-simtemp)/(3*volume);
+  //double correctedPressure=press_+deltaPressure;
+  //log.printf("Press %f deltaPressure %f correctedPressure %f \n",press_/0.0602,deltaPressure/0.0602,correctedPressure/0.0602);
+  return ((1.0/simtemp)- (1.0/rtemp_) )*energy + ((1.0/simtemp)*press_ - (1.0/rtemp_)*rpress_ )*volume;
 }
 
 }

@@ -20,8 +20,6 @@
    along with plumed.  If not, see <http://www.gnu.org/licenses/>.
 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ */
 #include "core/ActionRegister.h"
-#include "core/PlumedMain.h"
-#include "core/Atoms.h"
 #include "ReweightBase.h"
 
 //+PLUMEDOC REWEIGHTING REWEIGHT_TEMP
@@ -60,40 +58,41 @@ DUMPGRID GRID=hB FILE=histoB
 namespace PLMD {
 namespace bias {
 
-class ReweightTemperature : public ReweightBase {
+class ReweightPressure : public ReweightBase {
 private:
 ///
-  double rtemp;
+  double rpress_, press_;
 /// The biases we are using in reweighting and the args we store them separately
   std::vector<Value*> biases;
 public:
   static void registerKeywords(Keywords&);
-  explicit ReweightTemperature(const ActionOptions&ao);
+  explicit ReweightPressure(const ActionOptions&ao);
   double getLogWeight();
 };
 
-PLUMED_REGISTER_ACTION(ReweightTemperature,"REWEIGHT_TEMP")
+PLUMED_REGISTER_ACTION(ReweightPressure,"REWEIGHT_PRESSURE")
 
-void ReweightTemperature::registerKeywords(Keywords& keys ) {
+void ReweightPressure::registerKeywords(Keywords& keys ) {
   ReweightBase::registerKeywords( keys );
-  keys.add("compulsory","REWEIGHT_TEMP","reweight data from a trajectory at one temperature and output the probability "
+  keys.add("compulsory","REWEIGHT_PRESSURE","reweight data from a trajectory at one pressure and output the probability "
            "distribution at a second temperature. This is not possible during postprocessing.");
-  keys.remove("ARG"); keys.add("compulsory","ARG","*.bias","the biases or energies that must be taken into account when reweighting");
+  keys.add("compulsory","PRESSURE","Pressure of the trajectory");
+  keys.remove("ARG"); keys.add("compulsory","ARG","Volume");
 }
 
-ReweightTemperature::ReweightTemperature(const ActionOptions&ao):
+ReweightPressure::ReweightPressure(const ActionOptions&ao):
   Action(ao),
   ReweightBase(ao)
 {
-  parse("REWEIGHT_TEMP",rtemp);
-  log.printf("  reweighting simulation to probabilities at temperature %f\n",rtemp);
-  rtemp*=plumed.getAtoms().getKBoltzmann();
+  parse("REWEIGHT_PRESSURE",rpress_);
+  parse("PRESSURE",press_);
+  //rtemp*=plumed.getAtoms().getKBoltzmann();
+  if(getNumberOfArguments()>1) error(" Number of arguments should be 1. Only the volume should be given.");
 }
 
-double ReweightTemperature::getLogWeight() {
-  // Retrieve the bias
-  double bias=0.0; for(unsigned i=0; i<getNumberOfArguments(); ++i) bias+=getArgument(i);
-  return -( (1.0/rtemp) - (1.0/simtemp) )*bias;
+double ReweightPressure::getLogWeight() {
+  double volume=getArgument(0);
+  return - (1./simtemp) * ( rpress_ - press_ )*volume;
 }
 
 }
