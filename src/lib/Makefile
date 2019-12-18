@@ -48,14 +48,15 @@ SRC_MAIN=../main/main.cpp
 
 # source for plumed kernel
 # everything else
-SRC_KERNEL := $(shell for dir in $(KERNEL_MODULES) ; do ls $$dir/*.cpp 2>/dev/null ; ls $$dir/*.c 2>/dev/null ; done) ../config/Config$(PLUMED_INSTALL).o
+SRC_KERNEL := $(shell for dir in $(KERNEL_MODULES) ; do ls $$dir/*.cpp 2>/dev/null ; ls $$dir/*.c 2>/dev/null ; ls $$dir/*.cu 2>/dev/null ; done) ../config/Config$(PLUMED_INSTALL).o
 
 # corresponding objects:
 OBJ_WRAPPER := ../wrapper/PlumedStatic.o
 OBJ_DYNAMIC_WRAPPER := ../wrapper/Plumed.o
 OBJ_MAIN := $(SRC_MAIN:.cpp=.o)
 XXX := $(SRC_KERNEL:.cpp=.o)
-OBJ_KERNEL := $(XXX:.c=.o)
+XXX2 := $(XXX:.cu=.o)
+OBJ_KERNEL := $(XXX2:.c=.o)
 ALL_OBJ := $(OBJ_KERNEL) $(OBJ_WRAPPER) $(OBJ_DYNAMIC_WRAPPER) $(OBJ_MAIN)
 
 # when calling install-build, libraries in install should be built.

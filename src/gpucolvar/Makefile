@@ -1,6 +1,7 @@
 USE=core reference tools
 
-# generic makefile
+#generic makefile
+#
 # This is a generic makefile which will work for any
 # subpackage which just depends on config/
 # It just compiles objects locally
@@ -14,6 +15,8 @@ endif
 # if machine dependent configuration has been found:
 ifdef GCCDEP
 
+
+
 # source for plumed kernel
 SRC=$(wildcard *.cpp)
 SRCCU=$(wildcard *.cu)
@@ -25,6 +28,7 @@ OBJ+=$(SRCCU:.cu=.o)
 # dependency files for all c++ sources
 DEP=$(addprefix deps/,$(SRC:.cpp=.d))
 DEP+=$(addprefix deps/,$(SRC:.cu=.d))
+
 .PHONY: all dirslinks obj lib install
 
 # default target:
@@ -107,25 +111,10 @@ ifndef CXXDEP
 CXXDEP=$(CXX)
 CCDEP=$(CC)
 endif
-ifndef CUDA
-CUDA=nvcc
-endif
-
-ifndef CUDAFLAGS
-CUDAFLAGS=-arch=sm_60 -std=c++11
-endif
 
 ifndef VERBOSE
 AT=@
 endif
-
-# rule for cuda
-%.o: %.cu
-	@echo "compiling " $*.cu
-	@-test -d deps || mkdir deps
-	echo "$(AT)$(CUDA) $(CUDAFLAGS) -c $*.cu -o $*.o"
-	$(AT)$(CUDA) $(CUDAFLAGS) -c $*.cu -o $*.o
-
 
 # rule for c++
 %.o: %.cpp
@@ -157,6 +146,30 @@ ifneq ($(disable_dependency_tracking),yes)
 endif
 ifndef XLF
 	$(AT)$(CC) -c $(CPPFLAGS) $(ADDCPPFLAGS) $(CFLAGS) $*.c -o $*.o
+endif
+
+ifndef CUDA
+CUDA=nvcc
+endif
+
+ifndef CUDAFLAGS
+CUDAFLAGS=-arch=sm_60 -std=c++11 -shared -Xcompiler -fPIC 
+endif
+
+# rule for cuda
+%.o: %.cu
+	@echo "compiling " $*.cu
+	@-test -d deps || mkdir deps
+ifneq ($(disable_dependency_tracking),yes)
+	$(AT)$(CUDA) -c -MD $(CUDAFLAGS) $*.cu -o $*.o -MF $*.d 
+	@cp -f $*.d $*.d.tmp
+	@sed -e 's/.*://' -e 's/\\$$//' < $*.d.tmp | fmt -1 | \
+	 sed -e 's/^ *//' -e 's/$$/:/' >> $*.d
+	@mv $*.d deps/$*.d
+	@rm -f $*.d.tmp
+endif
+ifndef XLF
+	$(AT)$(CUDA) $(CUDAFLAGS) -c $*.cu -o $*.o
 endif
 
 #

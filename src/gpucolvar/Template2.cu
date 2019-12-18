@@ -24,6 +24,7 @@
 
 #include <string>
 #include <cmath>
+#include <stdio.h>
 
 using namespace std;
 
@@ -61,13 +62,18 @@ public:
   static void registerKeywords(Keywords& keys);
 };
 
+__global__ void GPUFunction() {
+  printf("Hello world from the GPU.\n");
+}
+
+
 PLUMED_REGISTER_ACTION(Template2,"TEMPLATE2")
 
 void Template2::registerKeywords(Keywords& keys) {
   Colvar::registerKeywords(keys);
   keys.addFlag("TEMPLATE2_DEFAULT_OFF_FLAG",false,"flags that are by default not performed should be specified like this");
   keys.addFlag("TEMPLATE2_DEFAULT_ON_FLAG",true,"flags that are by default performed should be specified like this");
-  keys.add("compulsory","TEMPLATE2_COMPULSORY","all compulsory keywords should be added like this with a description here");
+  //keys.add("compulsory","TEMPLATE2_COMPULSORY","all compulsory keywords should be added like this with a description here");
   keys.add("optional","TEMPLATE2_OPTIONAL","all optional keywords that have input should be added like a description here");
   keys.add("atoms","ATOMS","the keyword with which you specify what atoms to use should be added like this");
 }
@@ -92,8 +98,13 @@ Template2::Template2(const ActionOptions&ao):
   addValueWithDerivatives(); setNotPeriodic();
 
   requestAtoms(atoms);
-}
 
+  // function to run on the gpu
+  GPUFunction<<<1, 1>>>();
+  
+  // kernel execution is asynchronous so sync on its completion
+  cudaDeviceSynchronize();
+}
 
 // calculator
 void Template2::calculate() {
