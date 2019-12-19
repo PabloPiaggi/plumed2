@@ -31,7 +31,7 @@ using namespace std;
 namespace PLMD {
 namespace gpucolvar {
 
-//+PLUMEDOC COLVAR TEMPLATE2
+//+PLUMEDOC COLVAR COORDINATIONNUMBERGPU
 /*
 This file provides a template for if you want to introduce a new CV.
 
@@ -43,7 +43,7 @@ This file provides a template for if you want to introduce a new CV.
 
 \plumedfile
 # This should be a sample input.
-t: TEMPLATE2 ATOMS=1,2
+t: COORDINATIONNUMBERGPU ATOMS=1,2
 PRINT ARG=t STRIDE=100 FILE=COLVAR
 \endplumedfile
 <!---You should reference here the other actions used in this example--->
@@ -52,64 +52,106 @@ PRINT ARG=t STRIDE=100 FILE=COLVAR
 */
 //+ENDPLUMEDOC
 
-class Template2 : public Colvar {
+class CoordinationNumberGPU : public Colvar {
   bool pbc;
 
 public:
-  explicit Template2(const ActionOptions&);
+  explicit CoordinationNumberGPU(const ActionOptions&);
 // active methods:
   void calculate() override;
   static void registerKeywords(Keywords& keys);
 };
 
-__global__ void GPUFunction() {
-  printf("Hello world from the GPU.\n");
-}
+PLUMED_REGISTER_ACTION(CoordinationNumberGPU,"COORDINATIONNUMBERGPU")
 
-
-PLUMED_REGISTER_ACTION(Template2,"TEMPLATE2")
-
-void Template2::registerKeywords(Keywords& keys) {
+void CoordinationNumberGPU::registerKeywords(Keywords& keys) {
   Colvar::registerKeywords(keys);
-  keys.addFlag("TEMPLATE2_DEFAULT_OFF_FLAG",false,"flags that are by default not performed should be specified like this");
-  keys.addFlag("TEMPLATE2_DEFAULT_ON_FLAG",true,"flags that are by default performed should be specified like this");
-  //keys.add("compulsory","TEMPLATE2_COMPULSORY","all compulsory keywords should be added like this with a description here");
-  keys.add("optional","TEMPLATE2_OPTIONAL","all optional keywords that have input should be added like a description here");
+  keys.addFlag("COORDINATIONNUMBERGPU_DEFAULT_OFF_FLAG",false,"flags that are by default not performed should be specified like this");
+  keys.addFlag("COORDINATIONNUMBERGPU_DEFAULT_ON_FLAG",true,"flags that are by default performed should be specified like this");
+  //keys.add("compulsory","COORDINATIONNUMBERGPU_COMPULSORY","all compulsory keywords should be added like this with a description here");
+  keys.add("optional","COORDINATIONNUMBERGPU_OPTIONAL","all optional keywords that have input should be added like a description here");
   keys.add("atoms","ATOMS","the keyword with which you specify what atoms to use should be added like this");
 }
 
-Template2::Template2(const ActionOptions&ao):
+CoordinationNumberGPU::CoordinationNumberGPU(const ActionOptions&ao):
   PLUMED_COLVAR_INIT(ao),
   pbc(true)
 {
   vector<AtomNumber> atoms;
   parseAtomList("ATOMS",atoms);
-  if(atoms.size()!=2)
-    error("Number of specified atoms should be 2");
   bool nopbc=!pbc;
   parseFlag("NOPBC",nopbc);
   pbc=!nopbc;
   checkRead();
 
-  log.printf("  between atoms %d %d\n",atoms[0].serial(),atoms[1].serial());
   if(pbc) log.printf("  using periodic boundary conditions\n");
   else    log.printf("  without periodic boundary conditions\n");
 
   addValueWithDerivatives(); setNotPeriodic();
 
   requestAtoms(atoms);
+}
 
-  // function to run on the gpu
-  GPUFunction<<<1, 1>>>();
-  
-  // kernel execution is asynchronous so sync on its completion
-  cudaDeviceSynchronize();
+
+__device__ float* pbcDistanceGPU(float *position1, float *position2, float *box) {
+  float *distance = new float[3];
+  distance
 
 }
 
-// calculator
-void Template2::calculate() {
+__global__ void GPUFunction(float *value, float *positions,int n, float *box) {
+  *value=0;
+  int index = blockIdx.x * blockDim.x + threadIdx.x;
+  int stride = blockDim.x * gridDim.x;
+  for (int i = index; i < n; i += stride) {
+    for (int j = 0; j < n; j++) {
+      for (int k = 0; k < 3; k++) {
+        float *distance = new float[3];
+        float *position1 = new float[3];
+        float *position2 = new float[3];
+        distance = pbcDistanceGPU(position1,position2,box);
+        *value += distance[0];
+        delete [] distance; 
+        delete [] position1; 
+        delete [] position2; 
+      }
+    }
+  }
+}
 
+// calculator
+void CoordinationNumberGPU::calculate() {
+  float *value;
+  float *positions;
+  float *box;
+  cudaMallocManaged(&positions, getNumberOfAtoms()*3*sizeof(float));
+  cudaMallocManaged(&box, 9*sizeof(float));
+  cudaMallocManaged(&value, sizeof(float));
+
+  for (unsigned i=0;i<getNumberOfAtoms();i++) {
+    for (unsigned j=0;j<3;j++) {
+      positions[3*i+j] = getPosition(i)[j];
+    }
+  }
+  for (unsigned i=0;i<3;i++) {
+    for (unsigned j=0;j<3;j++) {
+      box[3*i+j] = getBox()[i][j];
+    }
+  }
+
+  int N = getNumberOfAtoms();
+  int blockSize = 256;
+  int numBlocks = (N + blockSize - 1) / blockSize;
+  // function to run on the gpu
+  GPUFunction<<<numBlocks, blockSize>>>(value, positions, N, box);
+  //GPUFunction<<<1, 1>>>(positions,getNumberOfAtoms()*3);
+  // kernel execution is asynchronous so sync on its completion
+  cudaDeviceSynchronize();
+
+  cudaFree(positions);
+  cudaFree(box);
+
+  /*
   Vector distance;
   if(pbc) {
     distance=pbcDistance(getPosition(0),getPosition(1));
@@ -122,7 +164,9 @@ void Template2::calculate() {
   setAtomsDerivatives(0,-invvalue*distance);
   setAtomsDerivatives(1,invvalue*distance);
   setBoxDerivatives  (-invvalue*Tensor(distance,distance));
-  setValue           (value);
+  */
+  setValue           (*value);
+  cudaFree(value);
 }
 
 }
