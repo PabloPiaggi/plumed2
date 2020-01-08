@@ -15,15 +15,20 @@ endif
 # if machine dependent configuration has been found:
 ifdef GCCDEP
 
-
-
 # source for plumed kernel
 SRC=$(wildcard *.cpp)
 SRCCU=$(wildcard *.cu)
 
+GPUCOLVAR_LIB_NAME=gpucolvar-plumed.a
+
 # corresponding objects:
-OBJ=$(SRC:.cpp=.o)
-OBJ+=$(SRCCU:.cu=.o)
+OBJ_CPP=$(SRC:.cpp=.o)
+OBJ_CUDA=$(SRCCU:.cu=.o)
+OBJ_CUDA_DLINK=$(SRCCU:.cu=.dlink.o)
+OBJ=$(OBJ_CPP)
+OBJ+=$(OBJ_CUDA)
+OBJ+=$(OBJ_CUDA_DLINK)
+OBJ+=$(GPUCOLVAR_LIB_NAME)
 
 # dependency files for all c++ sources
 DEP=$(addprefix deps/,$(SRC:.cpp=.d))
@@ -153,7 +158,7 @@ CUDA=nvcc
 endif
 
 ifndef CUDAFLAGS
-CUDAFLAGS=-arch=sm_60 -std=c++11 -shared -Xcompiler -fPIC 
+CUDAFLAGS=-arch=sm_60 -std=c++11 -shared -Xcompiler -fPIC
 endif
 
 # rule for cuda
@@ -161,7 +166,7 @@ endif
 	@echo "compiling " $*.cu
 	@-test -d deps || mkdir deps
 ifneq ($(disable_dependency_tracking),yes)
-	$(AT)$(CUDA) -c -MD $(CUDAFLAGS) $*.cu -o $*.o -MF $*.d 
+	$(AT)$(CUDA) -c -MD $(CUDAFLAGS) -dc $*.cu -o $*.o -MF $*.d 
 	@cp -f $*.d $*.d.tmp
 	@sed -e 's/.*://' -e 's/\\$$//' < $*.d.tmp | fmt -1 | \
 	 sed -e 's/^ *//' -e 's/$$/:/' >> $*.d
@@ -171,6 +176,16 @@ endif
 ifndef XLF
 	$(AT)$(CUDA) $(CUDAFLAGS) -c $*.cu -o $*.o
 endif
+
+# Device link step
+%.dlink.o: %.o
+	@echo "Device link step " $*.o
+	$(AT)$(CUDA) $(CUDAFLAGS) -dlink -o $*.dlink.o $*.o
+
+# Create library
+$(GPUCOLVAR_LIB_NAME): $(OBJ_CUDA) $(OBJ_CUDA_DLINK)
+	@echo "Creating library " $@
+	$(AT)$(CUDA) $(CUDAFLAGS) -lib -o $@ $^
 
 #
 CLEANLIST=*~ *.tmp *.xxd *.o *.so *.dylib *.gcda *.gcno *.a
