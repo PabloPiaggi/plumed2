@@ -26,6 +26,8 @@
 #include <cmath>
 #include <stdio.h>
 
+#define THREADS_PER_BLOCK 32
+
 using namespace std;
 
 namespace PLMD {
@@ -93,29 +95,66 @@ CoordinationNumberGPU::CoordinationNumberGPU(const ActionOptions&ao):
 }
 
 
-__device__ float* pbcDistanceGPU(float *position1, float *position2, float *box) {
-  float *distance = new float[3];
-  distance
-
+__device__ void pbcDistanceGPU(float *position1, float *position2, float *box, float *pbcDistance) {
+  //float *pbcDistance = new float[3];
+  pbcDistance[0] = position2[0]-position1[0];
+  pbcDistance[1] = position2[1]-position1[1];
+  pbcDistance[2] = position2[2]-position1[2];
+  // Only for orthorombic boxes
+  /*
+  float *diag = new float[3]; float *hdiag = new float[3]; float *mdiag = new float[3];
+  for(unsigned i=0; i<3; i++) {
+    diag[i]=box[4*i];
+    hdiag[i]=0.5*box[4*i];
+    mdiag[i]=-0.5*box[4*i];
+    printf(" i is %d; diag is %f; hdiag is %f; mdiag is %f; box is %f \n",i,diag[i],hdiag[i],mdiag[i],box[4*i]);
+  }
+  */
+  for(unsigned i=0; i<3; i++) {
+    while(pbcDistance[i]>0.5*box[4*i]) pbcDistance[i]-=box[4*i];
+    while(pbcDistance[i]<=-0.5*box[4*i]) pbcDistance[i]+=box[4*i];
+  }
+  //return pbcDistance;
+  //delete [] pbcDistance;
+  //delete [] diag; delete [] hdiag; delete [] mdiag;
 }
 
 __global__ void GPUFunction(float *value, float *positions,int n, float *box) {
-  *value=0;
+  *value=0.0;
+  __shared__ float coordinationNumbers[THREADS_PER_BLOCK];
   int index = blockIdx.x * blockDim.x + threadIdx.x;
   int stride = blockDim.x * gridDim.x;
   for (int i = index; i < n; i += stride) {
     for (int j = 0; j < n; j++) {
-      for (int k = 0; k < 3; k++) {
-        float *distance = new float[3];
-        float *position1 = new float[3];
-        float *position2 = new float[3];
-        distance = pbcDistanceGPU(position1,position2,box);
-        *value += distance[0];
-        delete [] distance; 
-        delete [] position1; 
-        delete [] position2; 
-      }
+      float *distance = new float[3];
+      float *position1 = new float[3];
+      float *position2 = new float[3];
+      for (int k = 0; k < 3; k++) position1[k]=positions[3*i+k]; 
+      for (int k = 0; k < 3; k++) position2[k]=positions[3*j+k]; 
+      pbcDistanceGPU(position1,position2,box,distance);
+      float distance2; 
+      distance2 = distance[0]*distance[0];
+      distance2 += distance[1]*distance[1];
+      distance2 += distance[2]*distance[2];
+      if (distance2 < 0.5) coordinationNumbers[threadIdx.x] += 1;
+      delete [] distance; 
+      delete [] position1; 
+      delete [] position2; 
     }
+  }
+
+  __syncthreads(); 
+
+  if( 0 == threadIdx.x ) {
+    float sum = 0.0;
+    for( int i = 0; i < THREADS_PER_BLOCK; i++ )
+      sum += coordinationNumbers[i];
+    atomicAdd( value , sum );
+  }
+  
+  // Reset to 0 coordinationNumbers
+  for (int i = 0; i < THREADS_PER_BLOCK; i++) {
+    coordinationNumbers[threadIdx.x] = 0.0;
   }
 }
 
@@ -140,10 +179,9 @@ void CoordinationNumberGPU::calculate() {
   }
 
   int N = getNumberOfAtoms();
-  int blockSize = 256;
-  int numBlocks = (N + blockSize - 1) / blockSize;
+  int numBlocks = (N + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK;
   // function to run on the gpu
-  GPUFunction<<<numBlocks, blockSize>>>(value, positions, N, box);
+  GPUFunction<<<numBlocks, THREADS_PER_BLOCK>>>(value, positions, N, box);
   //GPUFunction<<<1, 1>>>(positions,getNumberOfAtoms()*3);
   // kernel execution is asynchronous so sync on its completion
   cudaDeviceSynchronize();

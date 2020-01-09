@@ -19,7 +19,7 @@ ifdef GCCDEP
 SRC=$(wildcard *.cpp)
 SRCCU=$(wildcard *.cu)
 
-GPUCOLVAR_LIB_NAME=gpucolvar-plumed.a
+GPUCOLVAR_LIB_NAME=libgpucolvar.so
 
 # corresponding objects:
 OBJ_CPP=$(SRC:.cpp=.o)
@@ -158,7 +158,7 @@ CUDA=nvcc
 endif
 
 ifndef CUDAFLAGS
-CUDAFLAGS=-arch=sm_60 -std=c++11 -shared -Xcompiler -fPIC
+CUDAFLAGS=-arch=sm_60 -std=c++11 -shared -Xcompiler -fPIC -g -G
 endif
 
 # rule for cuda
@@ -185,7 +185,7 @@ endif
 # Create library
 $(GPUCOLVAR_LIB_NAME): $(OBJ_CUDA) $(OBJ_CUDA_DLINK)
 	@echo "Creating library " $@
-	$(AT)$(CUDA) $(CUDAFLAGS) -lib -o $@ $^
+	$(AT)$(CUDA) $(CUDAFLAGS) -o $@ $^
 
 #
 CLEANLIST=*~ *.tmp *.xxd *.o *.so *.dylib *.gcda *.gcno *.a

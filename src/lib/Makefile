@@ -50,9 +50,10 @@ SRC_MAIN=../main/main.cpp
 # everything else
 SRC_KERNEL := $(shell for dir in $(KERNEL_MODULES) ; do ls $$dir/*.cpp 2>/dev/null ; ls $$dir/*.c 2>/dev/null ; done) ../config/Config$(PLUMED_INSTALL).o
 # gpucolvar cuda library
-VERSION = $(shell if test -f ../../VERSION ; then grep -v \\\# ../../VERSION ; else echo "Unknown" ; fi )
-GPUCOLVAR_LIB_NAME=gpucolvar-plumed.a
-LIB_GPUCOLVAR := ../gpucolvar/$(GPUCOLVAR_LIB_NAME)
+GPUCOLVAR_LIB_NAME=gpucolvar
+LIB_GPUCOLVAR := ../gpucolvar/lib$(GPUCOLVAR_LIB_NAME).so
+LIB_GPUCOLVAR_DIR := $(realpath ../gpucolvar)
+DYNAMIC_LIBS += -L$(LIB_GPUCOLVAR_DIR) -l$(GPUCOLVAR_LIB_NAME) -Wl,-rpath,$(LIB_GPUCOLVAR_DIR)
 
 # corresponding objects:
 OBJ_WRAPPER := ../wrapper/PlumedStatic.o
@@ -60,7 +61,6 @@ OBJ_DYNAMIC_WRAPPER := ../wrapper/Plumed.o
 OBJ_MAIN := $(SRC_MAIN:.cpp=.o)
 XXX := $(SRC_KERNEL:.cpp=.o)
 OBJ_KERNEL := $(XXX:.c=.o)
-OBJ_KERNEL += $(LIB_GPUCOLVAR)
 ALL_OBJ := $(OBJ_KERNEL) $(OBJ_WRAPPER) $(OBJ_DYNAMIC_WRAPPER) $(OBJ_MAIN)
 
 # when calling install-build, libraries in install should be built.

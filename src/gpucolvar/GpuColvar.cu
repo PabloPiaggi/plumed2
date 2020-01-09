@@ -28,11 +28,34 @@
 
 #define THREADS_PER_BLOCK 32
 
+using namespace std;
+
 namespace PLMD {
 namespace gpucolvar {
 
-GpuColvar::GpuColvar(const ActionOptions&ao) : PLUMED_COLVAR_INIT(ao) {
+GpuColvar::GpuColvar(const ActionOptions&ao) :
+  Action(ao),
+  Colvar(ao)
+{
+  vector<AtomNumber> atoms;
+  parseAtomList("SPECIES",atoms);
+  bool nopbc=!pbc;
+  parseFlag("NOPBC",nopbc);
+  pbc=!nopbc;
+  checkRead();
+  if(pbc) log.printf("  using periodic boundary conditions\n");
+  else    log.printf("  without periodic boundary conditions\n");
+
+  addValueWithDerivatives(); setNotPeriodic();
+
+  requestAtoms(atoms);
 }
+
+void GpuColvar::registerKeywords(Keywords& keys) {
+  Colvar::registerKeywords(keys);
+  keys.add("atoms","SPECIES","the keyword with which you specify what atoms to use should be added like this");
+}
+
 
 __host__ __device__ void GpuColvar::pbcDistanceGPU(float *position1, float *position2, float *box, float *pbcDistance) {
   pbcDistance[0] = position2[0]-position1[0];
@@ -68,13 +91,18 @@ __global__ void GPUFunction(float *value, float *positions,int n, float *box) {
   }
 }
 */
-__global__ void GPUFunction(GpuColvar *mygpucolvar) {
+__global__ void GPUFunction(Bundle *mysystem) {
   // This function should call inside the loop a virtual function
   // that is defined in the derived class.
-  float* value = new float(1);
-  value[0]=0.0;
-  mygpucolvar->setValue(value);
-  delete [] value;
+  //mygpucolvar.*value=1.;
+  //if( 0 == threadIdx.x ) {
+    //if( 0 == blockIdx.x ) {
+      float* value = new float(1);
+      value[0]=1.0;
+      mysystem->setValue(value);
+      delete [] value;
+    //}
+  //}
   /*
   //__shared__ float coordinationNumbers[THREADS_PER_BLOCK];
   int index = blockIdx.x * blockDim.x + threadIdx.x;
@@ -96,7 +124,10 @@ __global__ void GPUFunction(GpuColvar *mygpucolvar) {
 void GpuColvar::calculate() {
   cudaMallocManaged(&positions, getNumberOfAtoms()*3*sizeof(float));
   cudaMallocManaged(&box, 9*sizeof(float));
-  cudaMallocManaged(&value, sizeof(float));
+ // cudaMallocManaged(&value, sizeof(float));
+  Bundle *devsystem;
+  cudaMallocManaged(&devsystem, sizeof(Bundle));
+  devsystem->initValue();
 
   for (unsigned i=0;i<getNumberOfAtoms();i++) {
     for (unsigned j=0;j<3;j++) {
@@ -112,15 +143,16 @@ void GpuColvar::calculate() {
   int N = getNumberOfAtoms();
   int numBlocks = (N + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK;
   // function to run on the gpu
-  GPUFunction<<<numBlocks, THREADS_PER_BLOCK>>>(this);
+  GPUFunction<<<1, 1>>>(devsystem);
+  //GPUFunction<<<numBlocks, THREADS_PER_BLOCK>>>(this);
   //GPUFunction<<<numBlocks, THREADS_PER_BLOCK>>>(value, positions, N, box);
   cudaDeviceSynchronize();
 
   cudaFree(positions);
   cudaFree(box);
 
-  Colvar::setValue           (*value);
-  cudaFree(value);
+  Colvar::setValue           (devsystem->getValue());
+  cudaFree(devsystem);
 }
 
 /*

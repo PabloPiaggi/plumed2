@@ -28,31 +28,36 @@
 #include <string>
 #include <cmath>
 #include <stdio.h>
-#include <thrust/device_vector.h>
 
 #define PLUMED_GPUCOLVAR_GPUCOLVAR_INIT(ao) GpuColvar(ao)
 
 namespace PLMD {
 namespace gpucolvar {
 
-class GpuColvar : public Colvar {
+class GpuColvar : 
+  public Colvar
+  // Maybe it is better to inherit from Action* classes
+{
   bool pbc;
   float *positions;
   float *box;
-  float *value;
+  //float *value;
 public:
+  static void registerKeywords(Keywords& keys);
   explicit GpuColvar(const ActionOptions&);
 // active methods:
   float* getPositions();
-  __host__ __device__ void setValue(float *myvalue);
+  //__host__ __device__ void setValue(float *myvalue);
+  // calculate function is defined here instead of in the derived class
   void calculate() override;
+  //virtual void calculate_atom(int atom_id);
   //thrust::device_vector<float> getPosition(int i);
   //thrust::device_vector<float> getBox();
   __host__ __device__ void pbcDistanceGPU(float *position1, float *position2, float *box, float *pbcDistance);
 };
 
-inline
 float* GpuColvar::getPositions() {
+  // A think a delete statement is missin
   float* pos = new float(3*getNumberOfAtoms());
   for (unsigned i=0;i<getNumberOfAtoms();i++) {
     for (unsigned j=0;j<3;j++) {
@@ -62,11 +67,26 @@ float* GpuColvar::getPositions() {
   return pos;
 }
 
-inline
-__host__ __device__ void GpuColvar::setValue(float *myvalue) {
-  value = myvalue;
+//__host__ __device__ void GpuColvar::setValue(float *myvalue) {
+//  value[0] = myvalue[0];
+//}
+
+class Bundle
+{
+private:
+  float *value;
+public:
+  __host__ __device__ void setValue(float *myvalue);
+  void initValue();
+};
+
+__host__ __device__ void Bundle::setValue(float *myvalue) {
+  value[0] = myvalue[0];
 }
 
+void Bundle::initValue() {
+  cudaMallocManaged(&value, sizeof(float));
+}
 
 /*
 inline
